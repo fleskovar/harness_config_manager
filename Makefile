@@ -16,8 +16,8 @@ ARGS ?=
 .DEFAULT_GOAL := help
 
 .PHONY: help install setup build dev run test test-watch typecheck check \
-        link unlink pack publish release demo clean distclean reinstall \
-        version-patch version-minor version-major
+        audit audit-fix link unlink pack publish release demo clean distclean \
+        reinstall version-patch version-minor version-major
 
 ## ---------------------------------------------------------------- help
 
@@ -34,6 +34,8 @@ help:
 	@echo   test-watch ..... run the test suite in watch mode
 	@echo   typecheck ...... typecheck without emitting
 	@echo   check .......... typecheck plus tests - run this before committing
+	@echo   audit .......... report known vulnerabilities in dependencies
+	@echo   audit-fix ...... apply non-breaking security updates
 	@echo   link ........... install hcm globally from this checkout
 	@echo   unlink ......... remove the global hcm link
 	@echo   pack ........... build a publishable tarball
@@ -84,6 +86,15 @@ typecheck:
 	$(NPM) run typecheck
 
 check: typecheck test
+
+audit:
+	$(NPM) audit
+
+# Only applies updates that stay within existing semver ranges. A fix needing a
+# major bump is reported but not applied -- `npm audit fix --force` can break
+# the build, so that stays a deliberate manual step.
+audit-fix:
+	$(NPM) audit fix
 
 ## ---------------------------------------------------------------- distribution
 

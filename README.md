@@ -195,6 +195,7 @@ tests/                  # merge/rollback unit tests + install round-trip
 | --- | --- |
 | `make setup` | Install dependencies, build, and run the checks |
 | `make check` | Typecheck plus tests — run before committing |
+| `make audit` | Report known vulnerabilities in dependencies |
 | `make dev ARGS="targets"` | Run the CLI from source, no build step |
 | `make run ARGS="list"` | Build, then run the built CLI |
 | `make test-watch` | Tests in watch mode |
