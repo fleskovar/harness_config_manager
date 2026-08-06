@@ -1,0 +1,129 @@
+# harness-config-manager
+#
+# Recipes are deliberately shell-agnostic: this repo is developed on Windows,
+# where make may hand recipes to either sh or cmd.exe. So every recipe is a
+# single command, file removal goes through `node -e` rather than rm/del, and
+# any quoting uses double quotes (the only kind both shells strip).
+
+NPM ?= npm
+NODE ?= node
+CLI := dist/cli.js
+SAMPLE := ./bundles/ts-review-kit
+
+# Extra arguments for `make dev` / `make run`, e.g. make run ARGS="list --installed"
+ARGS ?=
+
+.DEFAULT_GOAL := help
+
+.PHONY: help install setup build dev run test test-watch typecheck check \
+        link unlink pack publish release demo clean distclean reinstall \
+        version-patch version-minor version-major
+
+## ---------------------------------------------------------------- help
+
+# Dot leaders rather than spaces: sh collapses runs of whitespace in an
+# unquoted echo, and quoting would print literal quotes under cmd.exe.
+help:
+	@echo harness-config-manager - available targets
+	@echo   setup .......... install dependencies, build, and verify
+	@echo   install ........ install dependencies from the lockfile
+	@echo   build .......... compile TypeScript to dist/
+	@echo   dev ............ run the CLI from source, e.g. make dev ARGS=targets
+	@echo   run ............ run the built CLI, e.g. make run ARGS=list
+	@echo   test ........... run the test suite once
+	@echo   test-watch ..... run the test suite in watch mode
+	@echo   typecheck ...... typecheck without emitting
+	@echo   check .......... typecheck plus tests - run this before committing
+	@echo   link ........... install hcm globally from this checkout
+	@echo   unlink ......... remove the global hcm link
+	@echo   pack ........... build a publishable tarball
+	@echo   publish ........ run checks and publish to npm
+	@echo   release ........ check, build, and pack without publishing
+	@echo   version-patch .. bump the patch version and tag it
+	@echo   version-minor .. bump the minor version and tag it
+	@echo   version-major .. bump the major version and tag it
+	@echo   demo ........... show where the sample bundle would install
+	@echo   clean .......... remove build output and tarballs
+	@echo   distclean ...... clean, and remove node_modules
+	@echo   reinstall ...... distclean followed by setup
+
+## ---------------------------------------------------------------- dev environment
+
+# `npm ci` is reproducible but needs the lockfile; fall back when it is absent.
+ifeq ($(wildcard package-lock.json),)
+install:
+	$(NPM) install
+else
+install:
+	$(NPM) ci
+endif
+
+setup: install build check
+	@echo Environment ready. Run "make link" to put hcm on your PATH.
+
+## ---------------------------------------------------------------- build & run
+
+build:
+	$(NPM) run build
+
+dev:
+	$(NPM) run dev -- $(ARGS)
+
+run: build
+	$(NODE) $(CLI) $(ARGS)
+
+## ---------------------------------------------------------------- quality
+
+test:
+	$(NPM) test
+
+test-watch:
+	$(NPM) run test:watch
+
+typecheck:
+	$(NPM) run typecheck
+
+check: typecheck test
+
+## ---------------------------------------------------------------- distribution
+
+# npm link makes `hcm` resolve to this working copy, so edits take effect
+# after a `make build` with no reinstall.
+link: build
+	$(NPM) link
+
+unlink:
+	$(NPM) unlink -g harness-config-manager
+
+pack: check build
+	$(NPM) pack
+
+publish: check build
+	$(NPM) publish --access public
+
+release: pack
+	@echo Tarball built. Inspect it, then run "make publish" to release.
+
+version-patch:
+	$(NPM) version patch
+
+version-minor:
+	$(NPM) version minor
+
+version-major:
+	$(NPM) version major
+
+## ---------------------------------------------------------------- demo
+
+demo: build
+	$(NODE) $(CLI) info $(SAMPLE)
+
+## ---------------------------------------------------------------- cleanup
+
+clean:
+	$(NODE) -e "const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});for(const f of fs.readdirSync('.')) if(f.endsWith('.tgz')) fs.rmSync(f,{force:true});console.log('Removed dist/ and any .tgz tarballs')"
+
+distclean: clean
+	$(NODE) -e "require('fs').rmSync('node_modules',{recursive:true,force:true});console.log('Removed node_modules/')"
+
+reinstall: distclean setup

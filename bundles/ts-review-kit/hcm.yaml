@@ -1,0 +1,9 @@
+name: ts-review-kit
+version: 1.0.0
+description: Code-review agent, review command, TypeScript rules and a filesystem MCP server.
+author: harness-config-manager
+homepage: https://github.com/your-org/harness-config-manager
+tags:
+  - typescript
+  - review
+# Omitting "targets" means: install into any supported harness.
