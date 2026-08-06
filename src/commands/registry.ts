@@ -7,11 +7,22 @@ export async function registryAddCommand(
   source: string,
   options: { name?: string; cwd: string },
 ): Promise<void> {
-  const entry = await addToRegistry(source, options.cwd, { name: options.name });
-  log.success(
-    `Registered ${color.bold(entry.name)} v${entry.version} ${color.dim(describeSource(entry.source))}`,
+  const entries = await addToRegistry(source, options.cwd, { name: options.name });
+
+  for (const entry of entries) {
+    log.success(
+      `Registered ${color.bold(entry.name)} v${entry.version} ${color.dim(describeSource(entry.source))}`,
+    );
+  }
+
+  const names = entries.map((entry) => entry.name);
+  log.info(
+    color.dim(
+      names.length === 1
+        ? `Install it with: hcm install ${names[0]}`
+        : `Install them with: hcm install ${names.join(' && hcm install ')}`,
+    ),
   );
-  log.info(color.dim(`Install it with: hcm install ${entry.name}`));
 }
 
 export async function registryRemoveCommand(name: string): Promise<void> {

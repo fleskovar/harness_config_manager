@@ -70,6 +70,36 @@ export async function loadManifest(root: string): Promise<BundleManifest> {
   return manifest;
 }
 
+/**
+ * Find the bundles in a directory.
+ *
+ * A directory is either a bundle itself, or a *collection*: a folder whose
+ * immediate children are each a bundle. That covers the common case of one
+ * repository holding several kits side by side. Only one level is searched --
+ * nesting collections inside collections would make `hcm install <path>`
+ * unpredictable.
+ *
+ * Returns absolute directory paths, sorted, empty when nothing was found.
+ */
+export async function discoverBundleDirs(root: string): Promise<string[]> {
+  const absoluteRoot = path.resolve(root);
+  if (await findManifest(absoluteRoot)) return [absoluteRoot];
+
+  const entries = await fs.readdir(absoluteRoot, { withFileTypes: true });
+  const found: string[] = [];
+
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    if (!entry.isDirectory()) continue;
+    // Skip dot-directories and dependency folders rather than stat-ing them all.
+    if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+
+    const candidate = path.join(absoluteRoot, entry.name);
+    if (await findManifest(candidate)) found.push(candidate);
+  }
+
+  return found;
+}
+
 export async function loadBundle(root: string, source?: BundleSource): Promise<LoadedBundle> {
   const absoluteRoot = path.resolve(root);
   if (!(await isDirectory(absoluteRoot))) {

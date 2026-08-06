@@ -1,5 +1,13 @@
 #!/usr/bin/env node
 import { Command, Option } from 'commander';
+import {
+  configGetCommand,
+  configListCommand,
+  configSetCommand,
+  configUnsetCommand,
+} from './commands/config.js';
+import { exportCommand } from './commands/export.js';
+import { importCommand } from './commands/import.js';
 import { infoCommand } from './commands/info.js';
 import { initCommand } from './commands/init.js';
 import { installCommand } from './commands/install.js';
@@ -43,7 +51,7 @@ const targetOption = () =>
 
 program
   .command('install')
-  .argument('<bundle>', 'registered name, local path, or owner/repo[/subdir][#ref]')
+  .argument('<bundle>', 'registered name, local path, GitHub URL, or owner/repo[/subdir][#ref]')
   .description('install a bundle into one or more harnesses')
   .addOption(targetOption())
   .addOption(scopeOption())
@@ -103,7 +111,7 @@ program
 
 program
   .command('info')
-  .argument('<bundle>', 'registered name, local path, or owner/repo')
+  .argument('<bundle>', 'registered name, local path, GitHub URL, or owner/repo')
   .description('show a bundle’s contents and where each item would land')
   .addOption(scopeOption())
   .action(async (bundle, options) => {
@@ -143,11 +151,84 @@ program
   .description('list supported harnesses and their install locations')
   .action(() => targetsCommand({ cwd }));
 
+program
+  .command('export')
+  .argument('[file]', 'output file', 'bundles.txt')
+  .description('write installed (or registered) bundles to a shareable list')
+  .option('-r, --registry', 'export the local registry instead of what is installed here')
+  .addOption(
+    new Option('-s, --scope <scope>', 'scope to export').choices(['project', 'user', 'all']),
+  )
+  .option('--stdout', 'print the list instead of writing a file')
+  .action(async (file, options) => {
+    await exportCommand(file, {
+      registry: options.registry,
+      scope: options.scope as Scope | 'all' | undefined,
+      stdout: options.stdout,
+      cwd,
+    });
+  });
+
+program
+  .command('import')
+  .argument('[file]', 'bundles file to read', 'bundles.txt')
+  .description('register every bundle listed in a bundles file')
+  .option('-i, --install', 'also install each bundle after registering it')
+  .addOption(targetOption())
+  .addOption(scopeOption())
+  .option('--dry-run', 'with --install, show what would change without writing')
+  .option('--force', 'with --install, overwrite conflicting items')
+  .action(async (file, options) => {
+    await importCommand(file, {
+      install: options.install,
+      targets: options.target,
+      scope: options.scope as Scope,
+      force: options.force,
+      dryRun: options.dryRun,
+      cwd,
+    });
+  });
+
+const config = program.command('config').description('view and change hcm settings');
+
+config
+  .command('list', { isDefault: true })
+  .option('--json', 'machine-readable output')
+  .description('show every setting and where its value comes from')
+  .action(async (options) => {
+    await configListCommand({ json: options.json });
+  });
+
+config
+  .command('get')
+  .argument('<key>', 'setting name')
+  .description('print the effective value of a setting')
+  .action(async (key) => {
+    await configGetCommand(key);
+  });
+
+config
+  .command('set')
+  .argument('<key>', 'setting name')
+  .argument('<value>', 'new value')
+  .description('change a setting')
+  .action(async (key, value) => {
+    await configSetCommand(key, value);
+  });
+
+config
+  .command('unset')
+  .argument('<key>', 'setting name')
+  .description('revert a setting to its default')
+  .action(async (key) => {
+    await configUnsetCommand(key);
+  });
+
 const registry = program.command('registry').description('manage the list of known bundles');
 
 registry
   .command('add')
-  .argument('<source>', 'local path, or owner/repo[/subdir][#ref], or a GitHub URL')
+  .argument('<source>', 'local path, GitHub URL (web, clone or SSH), or owner/repo[/subdir][#ref]')
   .option('-n, --name <name>', 'override the registered name')
   .description('register a bundle so it can be installed by name')
   .action(async (source, options) => {

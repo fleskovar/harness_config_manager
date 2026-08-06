@@ -151,6 +151,9 @@ Consequences worth knowing:
 | `hcm targets` | Supported harnesses and their paths on this machine |
 | `hcm registry add <source>` | Register a bundle by path, `owner/repo`, or GitHub URL |
 | `hcm registry list\|remove` | Manage the registry |
+| `hcm export [file]` | Write installed (or `--registry`) bundles to `bundles.txt` |
+| `hcm import [file]` | Register everything a bundles file lists; `--install` to install too |
+| `hcm config` | Show settings; `config set\|get\|unset` to change them |
 
 `<bundle>` accepts a registered name, a local path, or a GitHub reference — so
 `hcm install ./my-kit` and `hcm install acme/kits/review#v2` both work without
@@ -165,14 +168,151 @@ registering first.
 
 ### GitHub sources
 
+Paste whatever GitHub gave you — the address bar, the clone box, or the short
+form. All of these work anywhere a bundle is accepted (`registry add`, `install`,
+`info`):
+
 ```bash
+# shorthand
 hcm registry add owner/repo                  # default branch
-hcm registry add owner/repo#v1.2.0           # tag or branch
+hcm registry add owner/repo#v1.2.0           # tag, branch or SHA
 hcm registry add owner/repo/bundles/my-kit   # subdirectory of a monorepo
+
+# copied from the browser
+hcm registry add https://github.com/owner/repo
+hcm registry add https://github.com/owner/repo?tab=readme-ov-file
 hcm registry add https://github.com/owner/repo/tree/main/bundles/my-kit
+hcm registry add https://github.com/owner/repo/blob/main/bundles/my-kit/hcm.yaml
+
+# copied from the clone box
+hcm registry add https://github.com/owner/repo.git
+hcm registry add git@github.com:owner/repo.git
 ```
 
-Tarballs are cached under `~/.hcm/cache`; `--refresh` re-downloads.
+Query strings and GitHub's own `#readme` / `#L42` anchors are ignored. A `/blob/`
+URL points at a file, so the bundle is taken to be the directory containing it —
+linking straight at a bundle's `hcm.yaml` does the right thing. Any other
+fragment is treated as a ref, so `.../repo#v1.2.0` works.
+
+One ambiguity is unavoidable: in `/tree/feature/login/bundles/kit`, GitHub itself
+can't tell the branch `feature/login` from a branch `feature` containing
+`login/bundles/kit` without asking the server. `hcm` takes the first segment as
+the ref, so for a branch name containing a slash use the shorthand instead:
+`owner/repo/bundles/kit#feature/login`.
+
+Tarballs are cached under `~/.hcm/cache`; `--refresh` re-downloads. See
+[Settings](#settings) to put the cache somewhere else.
+
+### Collections: many bundles in one place
+
+A directory — local or a GitHub repo — can hold several bundles side by side.
+Anything whose immediate subdirectories each contain an `hcm.yaml` is treated as
+a collection:
+
+```
+agent-kits/
+├── review-kit/
+│   └── hcm.yaml
+├── db-kit/
+│   └── hcm.yaml
+└── docs/            ← no manifest, ignored
+```
+
+Point any command at the collection and it acts on every bundle inside:
+
+```bash
+hcm registry add ./agent-kits        # registers review-kit and db-kit separately
+hcm registry add acme/agent-kits     # same, straight from GitHub
+hcm install ./agent-kits             # installs both
+hcm info acme/agent-kits             # describes both
+```
+
+Each is registered, installed and tracked under its own name, so
+`hcm uninstall review-kit` removes only that one. To work with a single bundle
+out of a collection, name its subdirectory: `hcm install acme/agent-kits/db-kit`.
+
+Only one level is searched. A bundle that happens to contain a nested `hcm.yaml`
+is still one bundle, not a collection.
+
+### Settings
+
+`hcm config` shows every setting, its effective value, and where that value came
+from:
+
+```bash
+hcm config                                  # list everything
+hcm config get cacheDir
+hcm config set cacheDir /srv/shared/hcm     # a path all your projects share
+hcm config unset cacheDir                   # back to the default
+```
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `cacheDir` | `~/.hcm/cache` | Where bundles downloaded from GitHub are stored |
+
+Precedence is environment variable, then `config.json`, then the default:
+
+| Variable | Overrides |
+| --- | --- |
+| `HCM_CACHE_DIR` | `cacheDir` |
+| `HCM_HOME` | The whole `~/.hcm` directory — config, registry, user state and the default cache |
+| `HCM_CONFIG` | The path of `config.json` itself |
+
+The cache is shared, so a bundle downloaded once installs into as many projects
+as you like without re-fetching. Pointing `cacheDir` at a shared or synced
+directory lets several machines reuse the same downloads. Changing it does not
+move existing downloads; they are simply re-fetched on next use.
+
+Local bundles are *referenced in place*, not copied into the cache — so while
+you are authoring one, editing it and re-running `hcm install` picks up your
+changes with nothing to invalidate.
+
+### Sharing a setup: `bundles.txt`
+
+`hcm export` writes the bundles you have as a plain list, one reference per
+line, that `hcm import` can replay on another machine:
+
+```bash
+hcm export                       # what is installed here -> bundles.txt
+hcm export --registry            # everything this machine knows about
+hcm export --scope user          # user-scope installs only
+hcm export --stdout              # print instead of writing
+```
+
+```
+# hcm bundles file
+# generated 2026-08-06T14:48:27.117Z
+# source: installed bundles (project scope)
+#
+# Recreate this setup with:  hcm import bundles.txt --install
+
+# review-kit v2.0.0 -> claude-code, copilot
+acme/kits/bundles/review#v2.0.0
+```
+
+Then elsewhere:
+
+```bash
+hcm import bundles.txt              # register everything listed
+hcm import bundles.txt --install    # register and install, honouring -t/-s
+```
+
+Commit `bundles.txt` and a new machine reproduces the setup in one command.
+Notes are comments, so the file stays a simple list of references — a line may
+be any form `hcm install` accepts, including a collection, which expands to
+every bundle inside it.
+
+**Only GitHub-backed bundles are exported.** A local path means nothing on
+another computer, so those are listed as skipped rather than written out:
+
+```
+! Skipped 1 local bundle(s), which cannot be fetched elsewhere:
+    local-kit (C:\work\local-kit)
+```
+
+Push a bundle to GitHub and re-register it if you want it to travel. An import
+where some entries fail registers everything it can, reports the rest, and exits
+non-zero.
 
 ## Layout of this repo
 

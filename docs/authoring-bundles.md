@@ -165,20 +165,60 @@ git init && git add . && git commit -m "Add my-kit"
 git remote add origin git@github.com:acme/my-kit.git && git push -u origin main
 ```
 
-Then anywhere else:
+Then anywhere else — paste whatever GitHub gave you, whether that's the short
+form, the browser address bar, or the clone box:
 
 ```bash
 hcm registry add acme/my-kit
+hcm registry add https://github.com/acme/my-kit
+hcm registry add git@github.com:acme/my-kit.git
 hcm install my-kit
 ```
 
-A monorepo of bundles works too — point at the subdirectory:
+A monorepo of bundles works too — point at the subdirectory. Linking straight at
+a bundle's `hcm.yaml` in the GitHub file viewer works as well; `hcm` takes the
+directory containing it:
 
 ```bash
 hcm registry add acme/agent-kits/bundles/my-kit#v1.2.0
+hcm registry add https://github.com/acme/agent-kits/tree/v1.2.0/bundles/my-kit
+hcm registry add https://github.com/acme/agent-kits/blob/v1.2.0/bundles/my-kit/hcm.yaml
 ```
 
 Pin a tag for anything a team depends on; `#ref` accepts branches, tags and SHAs.
+If your branch name contains a slash, use the shorthand form
+(`acme/agent-kits/bundles/my-kit#feature/login`) — a `/tree/` URL can't express
+that unambiguously.
+
+## Shipping several bundles together
+
+Put each bundle in its own folder at the same level and the parent becomes a
+*collection*:
+
+```
+agent-kits/
+├── README.md
+├── review-kit/
+│   ├── hcm.yaml
+│   └── agents/code-reviewer.md
+└── db-kit/
+    ├── hcm.yaml
+    └── mcp/postgres.json
+```
+
+```bash
+hcm registry add acme/agent-kits    # registers review-kit and db-kit
+hcm install acme/agent-kits         # installs both
+hcm install acme/agent-kits/db-kit  # or just one
+```
+
+Bundle names must be unique within a collection, since each is registered and
+installed under its own name. Files in the collection root that are not bundle
+directories — a README, a LICENSE, CI config — are ignored.
+
+Prefer a collection over one giant bundle when the pieces are independently
+useful: users install and uninstall at bundle granularity, so splitting lets
+them take the review kit without the database tooling.
 
 ## Testing a bundle before publishing
 

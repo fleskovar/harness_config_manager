@@ -1,11 +1,8 @@
-import os from 'node:os';
 import path from 'node:path';
+import { hcmHome, resolveCacheDir } from './config.js';
 import type { Scope } from './types.js';
 
-/** Everything hcm owns lives under one directory per scope. */
-export function hcmHome(): string {
-  return process.env.HCM_HOME ?? path.join(os.homedir(), '.hcm');
-}
+export { hcmHome };
 
 /** Where install receipts are recorded for a given scope. */
 export function stateFile(scope: Scope, cwd: string): string {
@@ -19,7 +16,7 @@ export function registryFile(): string {
   return path.join(hcmHome(), 'registry.json');
 }
 
-/** Checkout cache for bundles fetched from GitHub. */
-export function cacheDir(): string {
-  return path.join(hcmHome(), 'cache');
+/** Checkout cache for bundles fetched from GitHub; relocatable via config. */
+export function cacheDir(): Promise<string> {
+  return resolveCacheDir();
 }

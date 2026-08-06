@@ -2,8 +2,8 @@ import { validateBundle } from '../core/bundle.js';
 import { describeSource } from '../core/github.js';
 import { color, log } from '../core/logger.js';
 import { buildPlan } from '../core/planner.js';
-import { resolveBundle } from '../core/registry.js';
-import type { ResourceKind, Scope } from '../core/types.js';
+import { resolveBundles } from '../core/registry.js';
+import type { LoadedBundle, ResourceKind, Scope } from '../core/types.js';
 import { TARGET_IDS, getTarget } from '../targets/index.js';
 
 export interface InfoOptions {
@@ -13,7 +13,15 @@ export interface InfoOptions {
 
 /** Show what a bundle contains and where each item would land in every target. */
 export async function infoCommand(reference: string, options: InfoOptions): Promise<void> {
-  const { bundle } = await resolveBundle(reference, options.cwd);
+  const bundles = await resolveBundles(reference, options.cwd);
+
+  for (const [index, bundle] of bundles.entries()) {
+    if (index > 0) log.plain(color.dim('\n' + '─'.repeat(60)));
+    await describeBundle(bundle, options);
+  }
+}
+
+async function describeBundle(bundle: LoadedBundle, options: InfoOptions): Promise<void> {
   const { manifest } = bundle;
 
   log.plain(`${color.bold(manifest.name)} ${color.dim(`v${manifest.version}`)}`);

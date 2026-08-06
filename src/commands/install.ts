@@ -3,9 +3,9 @@ import { applyPlan } from '../core/executor.js';
 import { describeSource } from '../core/github.js';
 import { color, log } from '../core/logger.js';
 import { buildPlan } from '../core/planner.js';
-import { resolveBundle } from '../core/registry.js';
+import { resolveBundles } from '../core/registry.js';
 import { upsertInstallation } from '../core/state.js';
-import { installationId, type Scope, type TargetId } from '../core/types.js';
+import { installationId, type LoadedBundle, type Scope, type TargetId } from '../core/types.js';
 import { getTarget, TARGET_IDS } from '../targets/index.js';
 
 export interface InstallOptions {
@@ -18,8 +18,23 @@ export interface InstallOptions {
 }
 
 export async function installCommand(reference: string, options: InstallOptions): Promise<void> {
-  const { bundle } = await resolveBundle(reference, options.cwd, { refresh: options.refresh ?? false });
+  const bundles = await resolveBundles(reference, options.cwd, {
+    refresh: options.refresh ?? false,
+  });
 
+  if (bundles.length > 1) {
+    log.info(
+      `${color.bold(String(bundles.length))} bundles found: ` +
+        bundles.map((bundle) => bundle.manifest.name).join(', '),
+    );
+  }
+
+  for (const bundle of bundles) {
+    await installBundle(bundle, options);
+  }
+}
+
+async function installBundle(bundle: LoadedBundle, options: InstallOptions): Promise<void> {
   const declared = bundle.manifest.targets;
   const requested = (options.targets?.length ? options.targets : undefined) ?? declared ?? TARGET_IDS;
   const targets = requested.map((id) => getTarget(id).id);
@@ -45,7 +60,7 @@ export async function installCommand(reference: string, options: InstallOptions)
 }
 
 async function installOne(
-  bundle: Awaited<ReturnType<typeof resolveBundle>>['bundle'],
+  bundle: LoadedBundle,
   targetId: TargetId,
   options: InstallOptions,
 ): Promise<void> {

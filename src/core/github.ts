@@ -14,30 +14,34 @@ import { cacheDir } from './paths.js';
 import type { BundleSource } from './types.js';
 
 /**
- * Parse the shorthands people actually type:
- *   owner/repo
- *   owner/repo#branch
- *   owner/repo/sub/dir#branch
- *   https://github.com/owner/repo
- *   https://github.com/owner/repo/tree/branch/sub/dir
+ * Parse every form of GitHub reference someone might reasonably paste:
+ *
+ *   owner/repo                                        shorthand
+ *   owner/repo#branch                                 shorthand with ref
+ *   owner/repo/sub/dir#branch                         shorthand with subdirectory
+ *   https://github.com/owner/repo                     browser address bar
+ *   https://github.com/owner/repo?tab=readme-ov-file  ...with GitHub's query string
+ *   https://github.com/owner/repo/tree/main/sub/dir   browser, viewing a directory
+ *   https://github.com/owner/repo/blob/main/sub/hcm.yaml   browser, viewing a file
+ *   https://github.com/owner/repo.git                 HTTPS clone URL
+ *   git@github.com:owner/repo.git                     SSH clone URL
+ *   ssh://git@github.com/owner/repo.git               SSH clone URL, protocol form
  */
 export function parseGithubSource(input: string): BundleSource | undefined {
   const trimmed = input.trim();
+  if (!trimmed) return undefined;
 
-  const urlMatch = /^https?:\/\/github\.com\/([^/]+)\/([^/#]+?)(?:\.git)?(?:\/tree\/([^/]+)(?:\/(.*))?)?\/?$/.exec(
-    trimmed,
-  );
-  if (urlMatch) {
-    const [, owner, repo, ref, subdir] = urlMatch;
-    return {
-      type: 'github',
-      owner: owner as string,
-      repo: repo as string,
-      ref: ref ?? 'HEAD',
-      ...(subdir ? { subdir } : {}),
-    };
+  // SSH clone URLs, in both the scp-like and protocol forms.
+  const ssh = /^(?:ssh:\/\/)?git@github\.com[:/]([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(trimmed);
+  if (ssh) {
+    return { type: 'github', owner: ssh[1] as string, repo: ssh[2] as string, ref: 'HEAD' };
   }
 
+  // Web and HTTPS clone URLs, with or without www.
+  const url = /^(?:https?|git):\/\/(?:www\.)?github\.com\/(.+)$/i.exec(trimmed);
+  if (url) return parseGithubUrlPath(url[1] as string);
+
+  // Bare shorthand. Excluded when it looks like a filesystem path.
   const shorthand = /^([\w.-]+)\/([\w.-]+)(?:\/([^#]+))?(?:#(.+))?$/.exec(trimmed);
   if (shorthand && !trimmed.startsWith('.') && !path.isAbsolute(trimmed)) {
     const [, owner, repo, subdir, ref] = shorthand;
@@ -46,11 +50,66 @@ export function parseGithubSource(input: string): BundleSource | undefined {
       owner: owner as string,
       repo: repo as string,
       ref: ref ?? 'HEAD',
-      ...(subdir ? { subdir } : {}),
+      ...(subdir ? { subdir: trimSlashes(subdir) } : {}),
     };
   }
 
   return undefined;
+}
+
+/**
+ * Fragments GitHub's own UI appends. Treating these as a git ref would send us
+ * looking for a branch called "readme", so they are ignored -- but any other
+ * fragment is honoured as a ref, so `.../repo#v1.2.0` works as you'd expect.
+ */
+const UI_FRAGMENTS = new Set(['readme', 'readme-ov-file']);
+
+/** Parse the path portion of a github.com URL (everything after the host). */
+function parseGithubUrlPath(rest: string): BundleSource | undefined {
+  // Strip the query string, then split off the fragment.
+  const hashIndex = rest.indexOf('#');
+  const fragment = hashIndex >= 0 ? rest.slice(hashIndex + 1) : '';
+  const withoutFragment = hashIndex >= 0 ? rest.slice(0, hashIndex) : rest;
+  const pathname = (withoutFragment.split('?')[0] ?? '').replace(/\/+$/, '');
+
+  const segments = pathname.split('/').filter(Boolean);
+  const owner = segments[0];
+  const repo = segments[1]?.replace(/\.git$/, '');
+  if (!owner || !repo) return undefined;
+
+  // A fragment is a ref only when the URL did not already name one, and only
+  // when it is not one of GitHub's own UI anchors (#readme, #L42).
+  const fragmentRef =
+    fragment && !UI_FRAGMENTS.has(fragment.toLowerCase()) && !/^L\d+(?:-L\d+)?$/.test(fragment)
+      ? fragment
+      : undefined;
+
+  const kind = segments[2];
+  if (kind === 'tree' || kind === 'blob') {
+    const ref = segments[3];
+    if (!ref) return { type: 'github', owner, repo, ref: fragmentRef ?? 'HEAD' };
+
+    // GitHub uses /blob/ only for files and /tree/ for directories, so a blob
+    // URL's last segment is always a filename -- drop it to get the bundle
+    // directory. This holds for extensionless files such as README or LICENSE.
+    const parts = kind === 'blob' ? segments.slice(4, -1) : segments.slice(4);
+
+    return {
+      type: 'github',
+      owner,
+      repo,
+      ref,
+      ...(parts.length ? { subdir: parts.join('/') } : {}),
+    };
+  }
+
+  // Any other trailing path (/issues, /pulls, /releases) refers to the repo as
+  // a whole as far as we are concerned.
+  return { type: 'github', owner, repo, ref: fragmentRef ?? 'HEAD' };
+}
+
+function trimSlashes(value: string): string {
+  return value.replace(/^\/+|\/+$/g, '');
 }
 
 export function describeSource(source: BundleSource): string {
@@ -71,7 +130,7 @@ export async function fetchGithubBundle(
   source: Extract<BundleSource, { type: 'github' }>,
   options: { refresh?: boolean } = {},
 ): Promise<string> {
-  const root = path.join(cacheDir(), cacheKey(source));
+  const root = path.join(await cacheDir(), cacheKey(source));
   const bundleDir = source.subdir ? path.join(root, ...source.subdir.split('/')) : root;
 
   if (!options.refresh && (await isDirectory(bundleDir))) return bundleDir;
