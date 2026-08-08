@@ -11,7 +11,7 @@ hcm init my-kit --name my-kit
 hcm validate ./my-kit
 ```
 
-`hcm validate` checks for the mistakes that actually bite: agents and skills
+`hcm validate` checks for the mistakes that actually bite: subagents and skills
 without a `description`, MCP servers with neither `command` nor `url`, malformed
 `appliesTo`, and duplicate names within a kind.
 
@@ -32,7 +32,7 @@ Installing into an unlisted target is refused rather than silently partial.
 
 ## Writing each resource kind
 
-### Agents — `agents/<name>.md`
+### Subagents — `subagents/<name>.md`
 
 ```markdown
 ---
@@ -44,7 +44,7 @@ model: sonnet
 You are a meticulous code reviewer...
 ```
 
-The filename is the agent name unless frontmatter sets `name`. Write `tools` as a
+The filename is the subagent name unless frontmatter sets `name`. Write `tools` as a
 YAML list; `hcm` converts it to the comma-separated string Claude Code expects
 and leaves it a list for Copilot. The body becomes the system prompt.
 
@@ -122,10 +122,34 @@ One file per server. The filename is the server name.
 }
 ```
 
-Recognised keys: `command`, `args`, `url`, `env`, `startupTimeoutSeconds`,
-`callTimeoutSeconds`. `hcm` adds Copilot's required `type` (`stdio` or `http`,
-inferred from `command` vs `url`) and converts the timeouts to Reasonix's
-snake_case `[[plugins]]` keys.
+Recognised keys: `command`, `args`, `env`, `type`, `url`, `headers`,
+`startupTimeoutSeconds`, `callTimeoutSeconds`, `toolTimeoutSeconds`. Timeout keys
+may also be written in the snake_case form the Reasonix spec uses
+(`startup_timeout_seconds`).
+
+A remote server needs a `url`; the transport is inferred as `http` when you do
+not state a `type`, so this is enough:
+
+```json
+{
+  "url": "https://mcp.stripe.com",
+  "headers": { "Authorization": "Bearer ${STRIPE_KEY}" }
+}
+```
+
+Each target gets the form it expects:
+
+| Canonical | Claude Code `.mcp.json` | Copilot `.vscode/mcp.json` | Reasonix `reasonix.toml` |
+| --- | --- | --- | --- |
+| `command`, `args`, `env` | as written | as written | as written |
+| `url`, `headers` | as written | as written | as written |
+| *(transport)* | inferred by the harness | `type` added (`stdio`/`http`) | `type` added unless stdio, which is the documented default |
+| `startupTimeoutSeconds` | as written | as written | `startup_timeout_seconds` |
+| `callTimeoutSeconds` | as written | as written | `call_timeout_seconds` |
+| `toolTimeoutSeconds` | as written | as written | `tool_timeout_seconds` |
+
+`${VAR}` references are passed through untouched — every one of these harnesses
+expands them itself, so keep secrets in the environment rather than the bundle.
 
 Never commit secrets. Reference an environment variable instead:
 
@@ -156,7 +180,7 @@ without `hcm status` reporting drift.
 ### Assets — `assets/**`
 
 Copied verbatim into the harness directory. Use for scripts, templates and images
-that your agents or skills reference.
+that your subagents or skills reference.
 
 ## Sharing a bundle
 
@@ -200,7 +224,7 @@ agent-kits/
 ├── README.md
 ├── review-kit/
 │   ├── hcm.yaml
-│   └── agents/code-reviewer.md
+│   └── subagents/code-reviewer.md
 └── db-kit/
     ├── hcm.yaml
     └── mcp/postgres.json
@@ -238,7 +262,7 @@ Bundles collide when two of them claim the same item. Cheap habits that prevent 
 
 - **Namespace MCP server filenames** when wrapping a common service:
   `mcp/acme-postgres.json`, not `mcp/postgres.json`.
-- **Prefix agent and command names** with something recognisable if the bundle
+- **Prefix subagent and command names** with something recognisable if the bundle
   is for a specific team or product.
 - **Prefer `context/` over `settings/`** for anything advisory. Instruction text
   merges additively; settings keys are exclusive.

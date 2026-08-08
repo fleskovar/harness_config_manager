@@ -21,7 +21,7 @@ export const copilot: Target = {
   id: 'copilot',
   title: 'GitHub Copilot',
   docs: 'https://awesome-copilot.github.com/learning-hub/copilot-configuration-basics/',
-  supports: ['agent', 'skill', 'command', 'rule', 'context', 'mcp', 'settings', 'asset'],
+  supports: ['subagent', 'skill', 'command', 'rule', 'context', 'mcp', 'settings', 'asset'],
 
   scopeRoot(scope: Scope, cwd: string): string {
     return scope === 'user' ? path.join(os.homedir(), '.copilot') : cwd;
@@ -32,7 +32,7 @@ export const copilot: Target = {
     const base = ctx.scope === 'user' ? '' : '.github/';
 
     switch (resource.kind) {
-      case 'agent':
+      case 'subagent':
         return [
           markdownFile(`${base}agents/${resource.name}.agent.md`, resource, {
             name: resource.name,

@@ -11,7 +11,7 @@ import { hashValue } from './hash.js';
 import { getTarget } from '../targets/index.js';
 import { hasBlock } from '../merge/blocks.js';
 import { getAtPointer } from '../merge/json-merge.js';
-import { collidingTables, tryParseToml } from '../merge/toml.js';
+import { collidingTables, existingArrayEntryNames, tryParseToml } from '../merge/toml.js';
 import { ownershipIndex } from './state.js';
 import { readJsonIfExists } from './fsx.js';
 import type {
@@ -171,6 +171,22 @@ async function detectConflicts(
               path: relativePath,
               detail: `TOML table(s) already defined: [${collisions.join('], [')}] -- merge by hand`,
             });
+          }
+
+          // Array-of-tables entries append rather than collide, so the table
+          // name is fine -- but two [[plugins]] sharing a `name` would leave
+          // Reasonix with an ambiguous server.
+          for (const table of Object.keys(fragment.value)) {
+            const incoming = existingArrayEntryNames(fragment.value, table);
+            const present = new Set(existingArrayEntryNames(parsed.value, table));
+            for (const name of incoming) {
+              if (present.has(name)) {
+                conflicts.push({
+                  path: relativePath,
+                  detail: `[[${table}]] named "${name}" already exists`,
+                });
+              }
+            }
           }
         }
       }

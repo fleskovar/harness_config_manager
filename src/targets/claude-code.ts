@@ -18,7 +18,7 @@ export const claudeCode: Target = {
   id: 'claude-code',
   title: 'Claude Code',
   docs: 'https://code.claude.com/docs/en/claude-directory',
-  supports: ['agent', 'skill', 'command', 'rule', 'context', 'mcp', 'settings', 'asset'],
+  supports: ['subagent', 'skill', 'command', 'rule', 'context', 'mcp', 'settings', 'asset'],
 
   scopeRoot(scope: Scope, cwd: string): string {
     return scope === 'user' ? os.homedir() : cwd;
@@ -26,7 +26,7 @@ export const claudeCode: Target = {
 
   actions(resource: BundleResource, ctx: TargetContext): PlanAction[] {
     switch (resource.kind) {
-      case 'agent':
+      case 'subagent':
         return [
           markdownFile(`.claude/agents/${resource.name}.md`, resource, {
             name: resource.name,

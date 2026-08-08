@@ -27,13 +27,13 @@ afterEach(async () => {
   await fs.rm(workspace, { recursive: true, force: true });
 });
 
-/** Write a minimal bundle with an agent, a context doc, an MCP server and settings. */
+/** Write a minimal bundle with a subagent, a context doc, an MCP server and settings. */
 async function makeBundle(name: string, serverName: string, permission: string): Promise<string> {
   const root = path.join(workspace, name);
 
   const files: Record<string, string> = {
     'hcm.yaml': `name: ${name}\nversion: 1.0.0\ndescription: test bundle\n`,
-    [`agents/${name}-reviewer.md`]: `---\ndescription: Reviews code\ntools: [Read, Grep]\n---\n\nReview the code.\n`,
+    [`subagents/${name}-reviewer.md`]: `---\ndescription: Reviews code\ntools: [Read, Grep]\n---\n\nReview the code.\n`,
     'context/project.md': `## ${name}\n\nInstructions from ${name}.\n`,
     'mcp/placeholder.json': JSON.stringify({ command: serverName, args: ['--serve'] }),
     'settings/settings.json': JSON.stringify({ permissions: { allow: [permission] } }),

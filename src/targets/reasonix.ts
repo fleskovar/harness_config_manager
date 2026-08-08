@@ -10,6 +10,7 @@ import { toList } from './types.js';
 /**
  * Reasonix.
  * https://github.com/esengine/DeepSeek-Reasonix/blob/main-v2/docs/GUIDE.md
+ * Config schema: docs/SPEC.md section 5 (Configuration TOML).
  *
  *   .reasonix/agents/<name>.md      reasonix.toml -> [[plugins]] (MCP)
  *   .reasonix/skills/<name>/**      REASONIX.md   -> marker block
@@ -23,7 +24,7 @@ export const reasonix: Target = {
   id: 'reasonix',
   title: 'Reasonix',
   docs: 'https://github.com/esengine/DeepSeek-Reasonix/blob/main-v2/docs/GUIDE.md',
-  supports: ['agent', 'skill', 'command', 'rule', 'context', 'mcp', 'settings', 'asset'],
+  supports: ['subagent', 'skill', 'command', 'rule', 'context', 'mcp', 'settings', 'asset'],
 
   scopeRoot(scope: Scope, cwd: string): string {
     return scope === 'user' ? reasonixHome() : cwd;
@@ -35,7 +36,7 @@ export const reasonix: Target = {
     const configFile = ctx.scope === 'user' ? 'config.toml' : 'reasonix.toml';
 
     switch (resource.kind) {
-      case 'agent':
+      case 'subagent':
         return [
           markdownFile(`${base}agents/${resource.name}.md`, resource, {
             name: resource.name,
@@ -136,23 +137,61 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+/** Read a canonical field written in either camelCase or snake_case. */
+function field(server: Record<string, unknown>, camel: string, snake: string): unknown {
+  return server[camel] ?? server[snake];
+}
+
 /**
- * Map a canonical MCP server definition onto a Reasonix `[[plugins]]` entry.
- * TOML has no null, so undefined values are dropped rather than emitted.
+ * Map a canonical MCP server definition onto a Reasonix `[[plugins]]` entry,
+ * per docs/SPEC.md section 5:
+ *
+ *   [[plugins]]
+ *   name = "example"
+ *   command = "reasonix-plugin-example"
+ *   args = []
+ *   env = { FOO = "bar" }
+ *   type = "stdio"   # stdio (default) | http | sse
+ *   url = "https://mcp.stripe.com"
+ *   headers = { Authorization = "Bearer ${STRIPE_KEY}" }
+ *   startup_timeout_seconds = 60
+ *   call_timeout_seconds = 600
+ *   tool_timeout_seconds = { generate_video = 1800 }
+ *
+ * `${VAR}` expansion is Reasonix's job, so values pass through untouched.
+ * TOML has no null, so absent values are omitted rather than emitted empty.
  */
 function toPlugin(name: string, data: unknown): Record<string, unknown> {
   const server = asRecord(data);
   const plugin: Record<string, unknown> = { name };
 
+  // Transport. stdio is the documented default, so it is left implicit; http
+  // and sse must be stated or Reasonix would try to spawn a command.
+  const declared = server.type;
+  const type =
+    typeof declared === 'string' ? declared : typeof server.url === 'string' ? 'http' : 'stdio';
+  if (type !== 'stdio') plugin.type = type;
+
   if (typeof server.command === 'string') plugin.command = server.command;
   if (Array.isArray(server.args)) plugin.args = server.args;
   if (typeof server.url === 'string') plugin.url = server.url;
-  if (server.env && typeof server.env === 'object') plugin.env = server.env;
-  if (typeof server.startupTimeoutSeconds === 'number') {
-    plugin.startup_timeout_seconds = server.startupTimeoutSeconds;
-  }
-  if (typeof server.callTimeoutSeconds === 'number') {
-    plugin.call_timeout_seconds = server.callTimeoutSeconds;
+
+  const env = server.env;
+  if (env && typeof env === 'object' && !Array.isArray(env)) plugin.env = env;
+
+  const headers = server.headers;
+  if (headers && typeof headers === 'object' && !Array.isArray(headers)) plugin.headers = headers;
+
+  const startup = field(server, 'startupTimeoutSeconds', 'startup_timeout_seconds');
+  if (typeof startup === 'number') plugin.startup_timeout_seconds = startup;
+
+  const call = field(server, 'callTimeoutSeconds', 'call_timeout_seconds');
+  if (typeof call === 'number') plugin.call_timeout_seconds = call;
+
+  // Per-tool overrides, e.g. { generate_video = 1800 }.
+  const toolTimeouts = field(server, 'toolTimeoutSeconds', 'tool_timeout_seconds');
+  if (toolTimeouts && typeof toolTimeouts === 'object' && !Array.isArray(toolTimeouts)) {
+    plugin.tool_timeout_seconds = toolTimeouts;
   }
 
   return plugin;

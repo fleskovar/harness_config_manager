@@ -1,6 +1,6 @@
 # harness-config-manager (`hcm`)
 
-Define your agents, skills, commands, rules and MCP servers **once**, then install
+Define your subagents, skills, commands, rules and MCP servers **once**, then install
 them into whichever agent harness you happen to be using — and remove them again
 cleanly, even when several bundles share the same config file.
 
@@ -43,7 +43,7 @@ There is no resource list to maintain — the layout *is* the schema.
 ```
 my-kit/
 ├── hcm.yaml                        # name, version, description, tags, targets
-├── agents/code-reviewer.md         # subagent / persona
+├── subagents/code-reviewer.md      # delegated worker with its own prompt
 ├── skills/dependency-audit/        # SKILL.md plus supporting files
 │   ├── SKILL.md
 │   └── checklist.md
@@ -74,7 +74,7 @@ harness's home directory (`hcm targets` prints the exact paths on your machine).
 
 | Kind | Claude Code | GitHub Copilot | Reasonix |
 | --- | --- | --- | --- |
-| agent | `.claude/agents/<n>.md` | `.github/agents/<n>.agent.md` | `.reasonix/agents/<n>.md` |
+| subagent | `.claude/agents/<n>.md` | `.github/agents/<n>.agent.md` | `.reasonix/agents/<n>.md` |
 | skill | `.claude/skills/<n>/` | `.github/skills/<n>/` | `.reasonix/skills/<n>/` |
 | command | `.claude/commands/<n>.md` | `.github/prompts/<n>.prompt.md` | `.reasonix/commands/<n>.md` |
 | rule | `.claude/rules/<n>.md` | `.github/instructions/<n>.instructions.md` | `.reasonix/rules/<n>.md` |
@@ -89,8 +89,12 @@ appliesTo: ["**/*.ts", "**/*.tsx"]
 ```
 
 becomes `paths: [...]` for Claude Code and Reasonix, and `applyTo: '**/*.ts, **/*.tsx'`
-for Copilot. Agent `tools` become a comma-separated string for Claude Code and a
-YAML list for Copilot.
+for Copilot. Subagent `tools` become a comma-separated string for Claude Code and
+a YAML list for Copilot.
+
+Note the deliberate asymmetry: bundles say **subagent**, but each harness keeps
+its own word for the same thing — all three happen to call the directory
+`agents/`. `hcm` translates; you only learn one vocabulary.
 
 ## How rollback stays exact
 

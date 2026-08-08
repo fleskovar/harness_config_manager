@@ -130,19 +130,17 @@ export async function resolveBundles(
   try {
     return await loadBundlesFrom(source, options);
   } catch (error) {
-    if (error instanceof HcmError && registry.entries.length > 0) {
-      throw new HcmError(
-        `${error.message}`,
-        `Registered bundles: ${registry.entries.map((candidate) => candidate.name).join(', ')}`,
-      );
-    }
-    if (registry.entries.length === 0) {
-      throw new HcmError(
-        `Bundle "${reference}" not found`,
-        'No bundles are registered yet. Try "hcm registry add <path-or-repo>".',
-      );
-    }
-    throw error;
+    if (!(error instanceof HcmError)) throw error;
+
+    // Keep the specific diagnostic -- "this bundle has an agents/ directory",
+    // "this skill has no SKILL.md" -- and only supply a hint when the error
+    // did not carry one of its own.
+    const fallbackHint =
+      registry.entries.length > 0
+        ? `Registered bundles: ${registry.entries.map((candidate) => candidate.name).join(', ')}`
+        : 'No bundles are registered yet. Try "hcm registry add <path-or-repo>".';
+
+    throw new HcmError(error.message, error.hint ?? fallbackHint);
   }
 }
 

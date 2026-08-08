@@ -7,7 +7,7 @@
  *
  *   my-bundle/
  *     hcm.yaml
- *     agents/code-reviewer.md
+ *     subagents/code-reviewer.md
  *     skills/security-review/SKILL.md
  *     commands/fix-issue.md
  *     rules/testing.md
@@ -107,6 +107,20 @@ export async function loadBundle(root: string, source?: BundleSource): Promise<L
   }
 
   const manifest = await loadManifest(absoluteRoot);
+
+  // `agents/` was this directory's name before the rename to `subagents/`.
+  // Unknown directories are ignored, so without this the subagents would be
+  // silently dropped from the install rather than reported.
+  if (
+    (await isDirectory(path.join(absoluteRoot, 'agents'))) &&
+    !(await isDirectory(path.join(absoluteRoot, 'subagents')))
+  ) {
+    throw new HcmError(
+      `Bundle "${manifest.name}" has an "agents/" directory, which hcm no longer reads`,
+      'Rename it to "subagents/" -- the target harnesses keep their own naming.',
+    );
+  }
+
   const resources: BundleResource[] = [];
 
   for (const [directory, kind] of Object.entries(KIND_DIRECTORIES)) {
@@ -234,7 +248,10 @@ export function validateBundle(bundle: LoadedBundle): string[] {
   const problems: string[] = [];
 
   for (const resource of bundle.resources) {
-    if ((resource.kind === 'agent' || resource.kind === 'skill') && !resource.frontmatter.description) {
+    if (
+      (resource.kind === 'subagent' || resource.kind === 'skill') &&
+      !resource.frontmatter.description
+    ) {
       problems.push(`${resource.bundlePath}: missing "description" in frontmatter`);
     }
     if (resource.kind === 'mcp') {

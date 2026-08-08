@@ -19,7 +19,7 @@ export type Scope = 'project' | 'user';
 
 /** Harness-neutral resource kinds. Each target decides where they land. */
 export type ResourceKind =
-  | 'agent' // subagent / persona definition
+  | 'subagent' // delegated worker with its own prompt and tool access
   | 'skill' // directory bundling SKILL.md plus supporting files
   | 'command' // slash-command prompt template
   | 'rule' // path-scoped instructions
@@ -30,7 +30,7 @@ export type ResourceKind =
 
 /** Bundle directory name -> canonical kind. This is the whole bundle schema. */
 export const KIND_DIRECTORIES: Record<string, ResourceKind> = {
-  agents: 'agent',
+  subagents: 'subagent',
   skills: 'skill',
   commands: 'command',
   rules: 'rule',

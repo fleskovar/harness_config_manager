@@ -33,13 +33,13 @@ hcm install ${name}
 \`\`\`
 `,
 
-    'agents/example-agent.md': `---
-description: Describe when this agent should be used
+    'subagents/example-subagent.md': `---
+description: Describe when this subagent should be delegated to
 tools: [Read, Grep, Glob]
 ---
 
-You are a specialised assistant. Describe the agent's behaviour here; this body
-becomes the system prompt.
+You are a specialised assistant. Describe the subagent's behaviour here; this
+body becomes its system prompt.
 `,
 
     'commands/example-command.md': `---

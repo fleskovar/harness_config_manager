@@ -18,10 +18,10 @@ afterEach(async () => {
 
 async function makeBundle(root: string, name: string): Promise<string> {
   const dir = path.join(root, name);
-  await fs.mkdir(path.join(dir, 'agents'), { recursive: true });
+  await fs.mkdir(path.join(dir, 'subagents'), { recursive: true });
   await fs.writeFile(path.join(dir, 'hcm.yaml'), `name: ${name}\nversion: 1.0.0\n`);
   await fs.writeFile(
-    path.join(dir, 'agents', `${name}-agent.md`),
+    path.join(dir, 'subagents', `${name}-subagent.md`),
     '---\ndescription: test\n---\n\nBody.\n',
   );
   return dir;
@@ -77,8 +77,39 @@ describe('discoverBundleDirs', () => {
     const bundles = await Promise.all(dirs.map((dir) => loadBundle(dir)));
 
     expect(bundles.map((bundle) => bundle.manifest.name)).toEqual(['alpha', 'beta']);
-    expect(bundles[0]?.resources.map((r) => r.name)).toEqual(['alpha-agent']);
-    expect(bundles[1]?.resources.map((r) => r.name)).toEqual(['beta-agent']);
+    expect(bundles[0]?.resources.map((r) => r.name)).toEqual(['alpha-subagent']);
+    expect(bundles[1]?.resources.map((r) => r.name)).toEqual(['beta-subagent']);
+  });
+});
+
+describe('the agents -> subagents rename', () => {
+  it('refuses a bundle still using the old directory name', async () => {
+    const dir = path.join(workspace, 'legacy');
+    await fs.mkdir(path.join(dir, 'agents'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'hcm.yaml'), 'name: legacy\nversion: 1.0.0\n');
+    await fs.writeFile(
+      path.join(dir, 'agents', 'reviewer.md'),
+      '---\ndescription: test\n---\n\nBody.\n',
+    );
+
+    // Unknown directories are otherwise ignored, so a silent skip would drop
+    // the subagents from the install without saying anything.
+    await expect(loadBundle(dir)).rejects.toThrow(/agents\/.*no longer reads/s);
+  });
+
+  it('allows an agents/ directory alongside subagents/, which is then ignored', async () => {
+    const dir = await makeBundle(workspace, 'mixed');
+    await fs.mkdir(path.join(dir, 'agents'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'agents', 'stale.md'), '---\ndescription: x\n---\n\nOld.\n');
+
+    const bundle = await loadBundle(dir);
+    expect(bundle.resources.map((resource) => resource.name)).toEqual(['mixed-subagent']);
+  });
+
+  it('reports the canonical kind as subagent', async () => {
+    const dir = await makeBundle(workspace, 'kit');
+    const bundle = await loadBundle(dir);
+    expect(bundle.resources[0]?.kind).toBe('subagent');
   });
 });
 
