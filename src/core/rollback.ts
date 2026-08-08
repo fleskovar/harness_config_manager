@@ -25,9 +25,9 @@ import {
   removeArrayItems,
   removeAtPointer,
 } from '../merge/json-merge.js';
-import type { InstallationRecord, Receipt } from './types.js';
+import { isPreexisting, type InstallationRecord, type Receipt } from './types.js';
 
-export type RemovalStatus = 'removed' | 'restored' | 'missing' | 'modified' | 'partial';
+export type RemovalStatus = 'removed' | 'restored' | 'missing' | 'modified' | 'partial' | 'kept';
 
 export interface RemovalResult {
   receipt: Receipt;
@@ -90,6 +90,11 @@ async function rollbackFiles(
 
   for (const receipt of receipts) {
     if (receipt.op !== 'file') continue;
+
+    if (isPreexisting(receipt)) {
+      results.push({ receipt, status: 'kept', detail: 'was already here before we installed' });
+      continue;
+    }
 
     const current = await readTextIfExists(absolutePath);
     if (current === undefined) {
@@ -161,13 +166,21 @@ async function rollbackJson(
   const doc = await readJsonIfExists<JsonObject>(absolutePath);
 
   if (doc === undefined) {
-    return receipts.map((receipt) => ({ receipt, status: 'missing' as const }));
+    return receipts.map((receipt) => ({
+      receipt,
+      status: isPreexisting(receipt) ? ('kept' as const) : ('missing' as const),
+    }));
   }
 
   let changed = false;
 
   for (const receipt of receipts) {
     if (receipt.op === 'json-value') {
+      if (isPreexisting(receipt)) {
+        results.push({ receipt, status: 'kept', detail: 'was already here before we installed' });
+        continue;
+      }
+
       const outcome = removeAtPointer(doc, receipt.pointer, receipt.hash, {
         restore: receipt.previous,
         hadPrevious: receipt.hadPrevious,

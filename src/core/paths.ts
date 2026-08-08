@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { hcmHome, resolveCacheDir } from './config.js';
+import { hcmHome, resolveCacheDir, resolveStoreDir } from './config.js';
 import type { Scope } from './types.js';
 
 export { hcmHome };
@@ -19,4 +19,12 @@ export function registryFile(): string {
 /** Checkout cache for bundles fetched from GitHub; relocatable via config. */
 export function cacheDir(): Promise<string> {
   return resolveCacheDir();
+}
+
+/**
+ * Where registered bundles live: one directory per registry entry. This is the
+ * folder `hcm registry open` shows, and the copy installs read from.
+ */
+export function storeDir(): Promise<string> {
+  return resolveStoreDir();
 }

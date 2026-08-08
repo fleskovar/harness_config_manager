@@ -44,14 +44,20 @@ async function listAvailable(options: ListOptions): Promise<void> {
     return;
   }
 
-  const width = Math.max(...registry.entries.map((entry) => entry.name.length));
+  const nameWidth = Math.max(...registry.entries.map((entry) => entry.name.length));
+  const idWidth = Math.max(...registry.entries.map((entry) => entry.id.length));
 
   for (const entry of registry.entries) {
     const marker = installed.has(entry.name) ? color.green('●') : color.dim('○');
     const version = entry.version ? color.dim(` v${entry.version}`) : '';
-    log.plain(`${marker} ${color.bold(entry.name.padEnd(width))}${version}`);
-    if (entry.description) log.plain(`  ${color.dim(entry.description)}`);
-    log.plain(`  ${color.dim(describeSource(entry.source))}`);
+    const mode = entry.dev ? color.yellow(' [dev]') : '';
+    log.plain(
+      `${marker} ${color.dim(entry.id.padStart(idWidth))}  ` +
+        `${color.bold(entry.name.padEnd(nameWidth))}${version}${mode}`,
+    );
+    const indent = ' '.repeat(idWidth + 4);
+    if (entry.description) log.plain(`${indent}${color.dim(entry.description)}`);
+    log.plain(`${indent}${color.dim(describeSource(entry.source))}`);
   }
 }
 

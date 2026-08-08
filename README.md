@@ -25,15 +25,20 @@ Or without make: `npm ci && npm run build && npm link`.
 
 ```bash
 hcm init my-kit                  # scaffold a bundle
-hcm registry add ./my-kit        # make it installable by name
+hcm registry add ./my-kit        # make it installable by name or id
 hcm list                         # what can I install?
 hcm info my-kit                  # where would everything land?
 hcm install my-kit --dry-run     # check before writing
 hcm install my-kit               # install into every supported target
 hcm list --installed             # what is installed here?
 hcm status                       # is it all still intact?
+hcm update my-kit                # re-read the source, reinstall in place
 hcm uninstall my-kit             # remove exactly what was installed
 ```
+
+Every registered bundle also gets a one-character id, so the above is usually
+`hcm install 1`, `hcm update 1`. If you are *writing* the bundle, register it
+with `hcm registry add ./my-kit --dev` and your edits apply straight away.
 
 ## Bundle layout
 
@@ -144,15 +149,75 @@ Consequences worth knowing:
   record is kept so you can retry with `--force`.
 - **Overwrites are reversible.** When installing replaces an existing value, the
   old value is stored in the receipt and restored on uninstall.
-- **Conflicts are caught before writing.** Installing a bundle that would claim
-  an item another bundle already owns fails with the owner named, unless you
-  pass `--force`.
+- **Items you already had are adopted, not claimed.** If a server, file or key
+  is already exactly what the bundle would write, `hcm` records that the bundle
+  uses it but does not take ownership — uninstall leaves it exactly where it is.
+- **Everything else is asked about before writing.** See below.
+
+## When something is already there
+
+Installing into a real project usually means landing next to configuration
+somebody else — you, a teammate, another tool — already wrote. `hcm` decides
+what to do *before* it writes anything, and the answer depends on what it finds.
+
+**Already identical → adopted.** An MCP server in `.mcp.json` whose definition
+matches the bundle's byte for byte is left untouched: the file is not rewritten,
+not even reformatted, and the receipt records that the item was there first.
+`hcm status` counts it as adopted, `hcm uninstall` reports it as `kept` and
+leaves it behind, and a second bundle can adopt the same item without colliding.
+
+**Different → your call, one question per resource.** With a terminal attached,
+`hcm` asks. A skill is a dozen files but one question, because you mean one
+thing by all of them:
+
+```
+! mcp "light-plan" conflicts with what is already installed:
+    .mcp.json  mcpServers.light-plan already set to a different value
+  How should hcm handle mcp "light-plan"?
+  *1) skip     -- keep the existing one, install nothing
+   2) replace  -- overwrite it with the bundle version
+   3) rename   -- install under another name and update this bundle's instructions
+   4) abort    -- stop; write nothing at all
+```
+
+- **skip** — the existing item stays and the rest of the bundle installs as
+  normal. For a settings fragment only the colliding keys are dropped, since its
+  keys are independent; for everything else the whole resource is, because half
+  a skill on disk is worse than none.
+- **replace / overwrite** — the bundle's version wins. The old value is kept in
+  the receipt and restored when you uninstall.
+- **rename** — offered for MCP servers, which are addressed by name. The server
+  installs under the name you give, *and* every mention of the old name in the
+  rest of the bundle — `mcp__old__tool` prefixes and the bare name in skills,
+  subagents, commands and context — is rewritten to match, so the instructions
+  still point at a server that exists. The number of rewritten mentions is
+  reported; the substitution is textual, so check that count if the old name is
+  also an ordinary word. Names glued to other name characters (`light-plan` in
+  `light-plan-legacy`) are left alone, and the server's own `command` is never
+  rewritten. A rename decided for one harness is applied to the others in the
+  same run, so the server has one name everywhere.
+- **abort** — stops the whole run with nothing written.
+
+Answers are remembered per bundle for the length of the run: a bundle installed
+into three harnesses asks each question once.
+
+**No terminal?** Then there is nobody to ask, and `hcm` fails with the conflicts
+listed rather than guessing — the behaviour scripts and CI already relied on.
+Decide up front instead:
+
+```bash
+hcm install my-kit --on-conflict skip       # keep whatever is already there
+hcm install my-kit --on-conflict overwrite  # same as --force
+hcm install my-kit --on-conflict abort      # the default: fail and list them
+hcm install my-kit --on-conflict prompt     # ask even where hcm would not have
+```
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `hcm install <bundle>` | Install. `-t/--target`, `-s/--scope`, `--dry-run`, `--force`, `--refresh` |
+| `hcm install <bundle>` | Install. `-t/--target`, `-s/--scope`, `--dry-run`, `--force`, `--on-conflict`, `--refresh` |
+| `hcm update <bundle>\|all` | Re-read a registered bundle and reinstall it. `-t`, `-s`, `--dry-run`, `--force`, `--on-conflict` |
 | `hcm uninstall <bundle>` | Remove exactly what was installed. `-t`, `-s`, `--dry-run`, `--force` |
 | `hcm list` | Registered bundles (`●` = installed somewhere) |
 | `hcm list --installed` | Installed bundles. `--scope project\|user\|all`, `--json` |
@@ -161,15 +226,36 @@ Consequences worth knowing:
 | `hcm validate [dir]` | Check a bundle for common mistakes |
 | `hcm init [dir]` | Scaffold a new bundle |
 | `hcm targets` | Supported harnesses and their paths on this machine |
-| `hcm registry add <source>` | Register a bundle by path, `owner/repo`, or GitHub URL |
-| `hcm registry list\|remove` | Manage the registry |
+| `hcm registry add <source>` | Register a bundle by path, `owner/repo`, or GitHub URL. `--dev`, `-n/--name` |
+| `hcm registry remove <bundle...>` | Unregister and delete the stored copy |
+| `hcm registry open [bundle]` | Print — and open — where registered bundles are stored |
+| `hcm registry list` | List registered bundles with their ids |
 | `hcm export [file]` | Write installed (or `--registry`) bundles to `bundles.txt` |
-| `hcm import [file]` | Register everything a bundles file lists; `--install` to install too |
+| `hcm import [file]` | Register everything a bundles file lists; `--install` to install too, `--on-conflict` |
 | `hcm config` | Show settings; `config set\|get\|unset` to change them |
 
-`<bundle>` accepts a registered name, a local path, or a GitHub reference — so
-`hcm install ./my-kit` and `hcm install acme/kits/review#v2` both work without
-registering first.
+`<bundle>` accepts a registered **name or id**, a local path, or a GitHub
+reference — so `hcm install 3`, `hcm install ./my-kit` and
+`hcm install acme/kits/review#v2` all work, the last two without registering
+first.
+
+### Short ids
+
+Every registered bundle gets a one-character handle — `1`, `2`, … `a`, `b` —
+usable anywhere a name is:
+
+```bash
+hcm registry list           # 1  ts-review-kit v1.0.0
+hcm install 1               # …instead of typing the name
+hcm update 1
+hcm registry remove 1
+```
+
+Ids are assigned on registration and stay put; re-registering a bundle keeps
+its id, and an id freed by `registry remove` is handed to the next bundle
+registered. They are a local convenience, not an identity: `bundles.txt` and
+install receipts always record names and sources, so nothing that travels
+between machines depends on them.
 
 ### Scopes
 
@@ -214,6 +300,78 @@ the ref, so for a branch name containing a slash use the shorthand instead:
 
 Tarballs are cached under `~/.hcm/cache`; `--refresh` re-downloads. See
 [Settings](#settings) to put the cache somewhere else.
+
+### The store: where registered bundles live
+
+Registering **copies** the bundle into one central directory, `~/.hcm/store`,
+with a folder per entry:
+
+```bash
+hcm registry open           # prints the path, and opens it in your file manager
+hcm registry open 1         # just that bundle's folder
+hcm registry open --no-open # print only
+```
+
+```
+~/.hcm/store/
+├── 1-ts-review-kit/
+└── 2-db-kit/
+```
+
+So a registered bundle is a **snapshot**. Installing it today and again next
+month installs the same thing both times, whether it came from a GitHub ref that
+has since moved or a working directory you have been editing. `hcm update` is
+what goes back to the source; nothing else does.
+
+### Authoring: `registry add --dev`
+
+While you are writing a bundle, a snapshot is exactly wrong — you want the edit
+you just made. `--dev` registers a local bundle *in place*:
+
+```bash
+hcm registry add ./my-kit --dev
+# edit my-kit/subagents/reviewer.md
+hcm install my-kit          # picks up the edit; nothing to refresh
+```
+
+Dev entries are marked `[dev]` in `hcm list`, are read from your directory every
+time, and never have a copy in the store — so `hcm registry remove` unregisters
+them without touching your files. `--dev` is refused for GitHub sources: there
+is nothing to edit in place. Clone the repo and register the clone.
+
+### Updating
+
+`hcm update` re-reads a bundle from its source and puts the new version wherever
+the old one already was — every target and scope the ledger knows about:
+
+```bash
+hcm update my-kit           # or: hcm update 1
+hcm update all              # every registered bundle
+hcm update 1 --dry-run      # show the swap without doing it
+hcm update 1 -t claude-code -s project
+```
+
+It is a rollback followed by an install, not a write-over-the-top, because a new
+version is defined as much by what it *removed*: a subagent deleted upstream has
+to disappear from the harness too. Items you hand-edited since installing still
+block the way they do for `hcm uninstall`, and `--force` still overrides — an
+update never silently discards your changes. Anything the new version now
+collides with is put to you the same way `hcm install` does, and `--on-conflict`
+works here too.
+
+Bundles that are registered but not installed anywhere just get their stored
+copy refreshed.
+
+### Removing
+
+```bash
+hcm registry remove 1              # or by name; several at once is fine
+```
+
+That unregisters the bundle and deletes its copy from the store. Anything it
+installed stays where it is — removal tells you so, and `hcm uninstall` still
+works afterwards, because uninstall replays receipts and never needs the bundle
+files.
 
 ### Collections: many bundles in one place
 
@@ -261,13 +419,15 @@ hcm config unset cacheDir                   # back to the default
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `cacheDir` | `~/.hcm/cache` | Where bundles downloaded from GitHub are stored |
+| `storeDir` | `~/.hcm/store` | Where registered bundles themselves are kept |
 
 Precedence is environment variable, then `config.json`, then the default:
 
 | Variable | Overrides |
 | --- | --- |
 | `HCM_CACHE_DIR` | `cacheDir` |
-| `HCM_HOME` | The whole `~/.hcm` directory — config, registry, user state and the default cache |
+| `HCM_STORE_DIR` | `storeDir` |
+| `HCM_HOME` | The whole `~/.hcm` directory — config, registry, user state, cache and store |
 | `HCM_CONFIG` | The path of `config.json` itself |
 
 The cache is shared, so a bundle downloaded once installs into as many projects
@@ -275,9 +435,11 @@ as you like without re-fetching. Pointing `cacheDir` at a shared or synced
 directory lets several machines reuse the same downloads. Changing it does not
 move existing downloads; they are simply re-fetched on next use.
 
-Local bundles are *referenced in place*, not copied into the cache — so while
-you are authoring one, editing it and re-running `hcm install` picks up your
-changes with nothing to invalidate.
+`storeDir` moves the registered bundles themselves. Changing it does not move
+what is already there; entries whose folder has gone missing are re-fetched from
+their source on next use, so a relocated store repopulates itself. A bundle
+registered with `--dev` is never in the store at all — it is read from your
+working directory.
 
 ### Sharing a setup: `bundles.txt`
 
@@ -332,7 +494,8 @@ non-zero.
 src/
 ├── cli.ts              # command wiring
 ├── commands/           # one file per command
-├── core/               # bundle loading, planning, executing, rollback, state
+├── core/               # bundle loading, planning, executing, rollback, state,
+│                       # registry.ts + store.ts -- ids and the bundle snapshots
 ├── merge/              # json-merge.ts, blocks.ts, toml.ts -- the receipt machinery
 └── targets/            # one adapter per harness
 bundles/ts-review-kit/  # sample bundle exercising every resource kind

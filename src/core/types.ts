@@ -93,11 +93,26 @@ export type BundleSource =
   | { type: 'github'; owner: string; repo: string; ref: string; subdir?: string };
 
 export interface RegistryEntry {
+  /**
+   * Short alphanumeric handle -- `1`, `2`, ... `a`, `b` -- usable anywhere a
+   * bundle name is. Assigned on registration and stable until the entry goes.
+   */
+  id: string;
   name: string;
+  /** Where the bundle came from, and where `hcm update` re-reads it. */
   source: BundleSource;
   version?: string;
   description?: string;
   tags?: string[];
+  /**
+   * Directory name inside the store holding this bundle's files. Absent for
+   * `--dev` entries, which are read from `source` in place.
+   */
+  store?: string;
+  /** Registered with `--dev`: referenced in place so edits take effect at once. */
+  dev?: boolean;
+  addedAt?: string;
+  updatedAt?: string;
 }
 
 export interface RegistryFile {
@@ -116,6 +131,12 @@ export interface FileReceipt {
   path: string;
   /** sha256 of the bytes we wrote. */
   hash: string;
+  /**
+   * The item was already there, byte-for-byte what we would have written, and
+   * nobody claimed it. We adopt it -- the bundle depends on it, but it is not
+   * ours to delete, so uninstall leaves it alone.
+   */
+  preexisting?: boolean;
 }
 
 /** A value merged into a JSON document at `pointer` (a list of object keys). */
@@ -128,6 +149,8 @@ export interface JsonValueReceipt {
   /** Restored on uninstall when we overwrote something. */
   previous?: unknown;
   hadPrevious: boolean;
+  /** Adopted rather than written -- see `FileReceipt.preexisting`. */
+  preexisting?: boolean;
 }
 
 /** Items appended to a JSON array; removed by value hash, so order is irrelevant. */
@@ -148,6 +171,11 @@ export interface BlockReceipt {
 }
 
 export type Receipt = FileReceipt | JsonValueReceipt | JsonArrayItemReceipt | BlockReceipt;
+
+/** True for receipts recording an item we adopted rather than wrote. */
+export function isPreexisting(receipt: Receipt): boolean {
+  return (receipt.op === 'file' || receipt.op === 'json-value') && receipt.preexisting === true;
+}
 
 export function describeReceipt(receipt: Receipt): string {
   switch (receipt.op) {
@@ -203,6 +231,19 @@ export interface PlanAction {
   /** Shown by --dry-run. */
   describe: string;
   payload: PlanPayload;
+  /**
+   * The bundle resource this write came from. Targets do not set it -- the
+   * planner attaches it, so conflicts can be resolved a resource at a time
+   * rather than a file at a time (one skill is many files, one decision).
+   */
+  resource?: BundleResource;
+  /** Already present and identical: record it, but do not write or own it. */
+  adopt?: boolean;
+}
+
+/** Stable key for "the same resource", used to group and remember decisions. */
+export function resourceKey(resource: BundleResource): string {
+  return `${resource.kind}:${resource.name}`;
 }
 
 export interface PlanConflict {
@@ -210,6 +251,10 @@ export interface PlanConflict {
   detail: string;
   /** The bundle that already owns the item, when known. */
   owner?: string;
+  /** The resource whose write collided, when known. */
+  resource?: BundleResource;
+  /** Set for JSON conflicts, so a resolution can name the colliding key. */
+  pointer?: string[];
 }
 
 export interface InstallPlan {

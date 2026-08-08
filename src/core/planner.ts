@@ -6,19 +6,23 @@
  * plan that never reaches the executor.
  */
 
-import { fromPosix, readTextIfExists } from './fsx.js';
-import { hashValue } from './hash.js';
+import { fromPosix, readBytesIfExists, readTextIfExists } from './fsx.js';
+import { hashValue, sha256 } from './hash.js';
 import { getTarget } from '../targets/index.js';
 import { hasBlock } from '../merge/blocks.js';
 import { getAtPointer } from '../merge/json-merge.js';
 import { collidingTables, existingArrayEntryNames, tryParseToml } from '../merge/toml.js';
-import { ownershipIndex } from './state.js';
+import { ownedReceipts, ownershipIndex } from './state.js';
 import { readJsonIfExists } from './fsx.js';
+import type { Target } from '../targets/types.js';
+import { isPreexisting } from './types.js';
 import type {
+  BundleResource,
   InstallPlan,
   LoadedBundle,
   PlanAction,
   PlanConflict,
+  Receipt,
   Scope,
   TargetId,
 } from './types.js';
@@ -55,7 +59,7 @@ export async function buildPlan(
       skipped.push({ resource, reason: `${target.title} has no mapping for ${resource.kind}` });
       continue;
     }
-    actions.push(...target.actions(resource, { bundle: bundle.manifest.name, scope }));
+    actions.push(...resourceActions(target, resource, bundle.manifest.name, scope));
   }
 
   const conflicts = await detectConflicts(actions, scopeRoot, bundle.manifest.name, targetId, scope, cwd);
@@ -64,11 +68,34 @@ export async function buildPlan(
 }
 
 /**
+ * The writes one resource implies, each tagged with the resource it came from.
+ * Also used when a conflict resolution renames a resource and its actions have
+ * to be regenerated under the new name.
+ */
+export function resourceActions(
+  target: Target,
+  resource: BundleResource,
+  bundleName: string,
+  scope: Scope,
+): PlanAction[] {
+  return target
+    .actions(resource, { bundle: bundleName, scope })
+    .map((action) => ({ ...action, resource }));
+}
+
+/**
  * A conflict is anything where writing would silently destroy something we do
  * not own: a foreign file at the same path, a JSON key another bundle claims,
  * or a TOML table that already exists (which would produce invalid TOML).
+ *
+ * An item that is already exactly what we would write is not a conflict but an
+ * *adoption*: the action is marked `adopt` so the executor records it without
+ * writing and without claiming the right to delete it later.
+ *
+ * Exported because resolving a conflict (skip, overwrite, rename) changes the
+ * action list, and the result has to be re-checked against disk.
  */
-async function detectConflicts(
+export async function detectConflicts(
   actions: PlanAction[],
   scopeRoot: string,
   bundleName: string,
@@ -78,8 +105,10 @@ async function detectConflicts(
 ): Promise<PlanConflict[]> {
   const conflicts: PlanConflict[] = [];
   const owners = await ownershipIndex(scope, cwd, targetId, bundleName);
+  const mine = await ownedReceipts(scope, cwd, targetId, bundleName);
   const jsonCache = new Map<string, unknown>();
   const textCache = new Map<string, string | undefined>();
+  const byteCache = new Map<string, Buffer | undefined>();
 
   async function readJsonCached(relativePath: string): Promise<unknown> {
     if (!jsonCache.has(relativePath)) {
@@ -95,44 +124,103 @@ async function detectConflicts(
     return textCache.get(relativePath);
   }
 
+  async function readBytesCached(relativePath: string): Promise<Buffer | undefined> {
+    if (!byteCache.has(relativePath)) {
+      byteCache.set(relativePath, await readBytesIfExists(fromPosix(scopeRoot, relativePath)));
+    }
+    return byteCache.get(relativePath);
+  }
+
   for (const action of actions) {
-    const { path: relativePath, payload } = action;
+    const { path: relativePath, payload, resource } = action;
+    delete action.adopt;
 
     if (payload.kind === 'file') {
-      const existing = await readTextCached(relativePath);
-      const owner = owners.get(`${relativePath}::file`);
+      const key = `${relativePath}::file`;
+      const owner = owners.get(key);
       if (owner) {
         conflicts.push({
           path: relativePath,
           detail: `file is owned by bundle "${owner}"`,
           owner,
+          resource,
         });
-      } else if (existing !== undefined) {
-        const incoming = typeof payload.contents === 'string' ? payload.contents : payload.contents.toString('utf8');
-        if (existing !== incoming) {
-          conflicts.push({ path: relativePath, detail: 'file exists and differs from what we would write' });
+        continue;
+      }
+
+      // Text is compared as text and bytes as bytes: an image round-tripped
+      // through UTF-8 would never match itself.
+      const existing =
+        typeof payload.contents === 'string'
+          ? await readTextCached(relativePath)
+          : await readBytesCached(relativePath);
+      if (existing === undefined) continue;
+
+      const identical =
+        typeof existing === 'string'
+          ? existing === payload.contents
+          : existing.equals(payload.contents as Buffer);
+
+      if (!weWroteIt(mine, key)) {
+        // Not ours: identical means adopt, anything else needs a decision.
+        if (identical) action.adopt = true;
+        else {
+          conflicts.push({
+            path: relativePath,
+            detail: 'file exists and differs from what we would write',
+            resource,
+          });
         }
+      } else if (!identical && !unchangedSinceWeWroteIt(mine, key, existing)) {
+        conflicts.push({
+          path: relativePath,
+          detail: 'file was edited since we installed it',
+          resource,
+        });
       }
       continue;
     }
 
     if (payload.kind === 'json-value') {
-      const key = `${relativePath}::json:${payload.pointer.join('.')}`;
+      const label = payload.pointer.join('.');
+      const key = `${relativePath}::json:${label}`;
       const owner = owners.get(key);
       if (owner) {
         conflicts.push({
           path: relativePath,
-          detail: `${payload.pointer.join('.')} is owned by bundle "${owner}"`,
+          detail: `${label} is owned by bundle "${owner}"`,
           owner,
+          resource,
+          pointer: payload.pointer,
         });
         continue;
       }
       const doc = await readJsonCached(relativePath);
       const existing = doc === undefined ? undefined : getAtPointer(doc, payload.pointer);
-      if (existing !== undefined && hashValue(existing) !== hashValue(payload.value)) {
+      if (existing === undefined) continue;
+
+      if (!weWroteIt(mine, key)) {
+        if (hashValue(existing) === hashValue(payload.value)) action.adopt = true;
+        else {
+          conflicts.push({
+            path: relativePath,
+            detail: `${label} already set to a different value`,
+            resource,
+            pointer: payload.pointer,
+          });
+        }
+        continue;
+      }
+
+      if (
+        hashValue(existing) !== hashValue(payload.value) &&
+        !unchangedSinceWeWroteIt(mine, key, existing)
+      ) {
         conflicts.push({
           path: relativePath,
-          detail: `${payload.pointer.join('.')} already set to a different value`,
+          detail: `${label} already set to a different value`,
+          resource,
+          pointer: payload.pointer,
         });
       }
       continue;
@@ -151,6 +239,7 @@ async function detectConflicts(
         path: relativePath,
         detail: `block ${payload.blockId} is owned by bundle "${owner}"`,
         owner,
+        resource,
       });
       continue;
     }
@@ -158,7 +247,11 @@ async function detectConflicts(
     if (payload.syntax === 'toml' && existing !== undefined) {
       const parsed = tryParseToml(existing);
       if (!parsed.ok) {
-        conflicts.push({ path: relativePath, detail: `existing TOML is unparseable: ${parsed.error}` });
+        conflicts.push({
+          path: relativePath,
+          detail: `existing TOML is unparseable: ${parsed.error}`,
+          resource,
+        });
         continue;
       }
       // Skip tables our own block already contributes -- reinstall is not a conflict.
@@ -170,6 +263,7 @@ async function detectConflicts(
             conflicts.push({
               path: relativePath,
               detail: `TOML table(s) already defined: [${collisions.join('], [')}] -- merge by hand`,
+              resource,
             });
           }
 
@@ -184,6 +278,7 @@ async function detectConflicts(
                 conflicts.push({
                   path: relativePath,
                   detail: `[[${table}]] named "${name}" already exists`,
+                  resource,
                 });
               }
             }
@@ -194,4 +289,34 @@ async function detectConflicts(
   }
 
   return conflicts;
+}
+
+/**
+ * True when this bundle actually wrote the item, as opposed to adopting one
+ * that was already there. Adopted items are never ours to overwrite silently,
+ * so they are re-evaluated from scratch on every install.
+ */
+function weWroteIt(mine: Map<string, Receipt>, key: string): boolean {
+  const receipt = mine.get(key);
+  return receipt !== undefined && !isPreexisting(receipt);
+}
+
+/**
+ * True when the item on disk is one this same bundle wrote and nobody has
+ * touched since. Overwriting that is an upgrade, not a collision -- but an item
+ * that no longer hashes to its receipt has been hand-edited, and still stops us.
+ */
+function unchangedSinceWeWroteIt(
+  mine: Map<string, Receipt>,
+  key: string,
+  existing: unknown,
+): boolean {
+  const receipt = mine.get(key);
+  if (!receipt) return false;
+  if (receipt.op === 'file') {
+    if (typeof existing !== 'string' && !Buffer.isBuffer(existing)) return false;
+    return sha256(existing) === receipt.hash;
+  }
+  if (receipt.op === 'json-value') return hashValue(existing) === receipt.hash;
+  return false;
 }

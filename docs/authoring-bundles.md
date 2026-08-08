@@ -9,7 +9,14 @@ harnesses. See the [README](../README.md) for the CLI reference, and
 ```bash
 hcm init my-kit --name my-kit
 hcm validate ./my-kit
+hcm registry add ./my-kit --dev
 ```
+
+`--dev` matters while you are authoring. Registering normally copies the bundle
+into `~/.hcm/store`, so what you install is a snapshot taken at that moment and
+later edits need an `hcm update`. A `--dev` entry is read from your working
+directory every time, so the loop is edit → `hcm install my-kit` → look at the
+result, with nothing to refresh in between.
 
 `hcm validate` checks for the mistakes that actually bite: subagents and skills
 without a `description`, MCP servers with neither `command` nor `url`, malformed
@@ -197,7 +204,8 @@ A fragment deep-merged into the harness's settings file.
 Each **leaf** becomes its own receipt, so two bundles can own different keys in
 the same file and uninstall independently. Arrays are *appended to*, not
 replaced, and de-duplicated — which is what permission lists need. Scalars are
-*set*; if one is already present with a different value, that is a conflict.
+*set*; one already present with a different value is a conflict the user is
+asked about, key by key.
 
 Keep fragments minimal. Every key you set is a key the user cannot change
 without `hcm status` reporting drift.
@@ -281,6 +289,19 @@ hcm install /path/to/my-kit && hcm status && hcm uninstall my-kit
 A clean install/uninstall round-trip in an empty directory should leave nothing
 behind. If it does not, that is a bug worth reporting.
 
+Reinstalling a `--dev` bundle over itself is fine: items you installed and
+nobody has touched are replaced without `--force`, and an item somebody
+hand-edited stops to ask rather than being overwritten. To check what your users
+will get when you ship a change, use `hcm update my-kit --dry-run` — that shows
+the removals as well as the writes, which is where a renamed or deleted resource
+shows up.
+
+Worth testing deliberately: install into a directory that already has a
+`.mcp.json` containing one of your servers. If the definitions match, the
+install reports the server as adopted and leaves the file untouched; if they
+differ, you are asked what to do. Seeing both tells you how your bundle lands in
+a project that is not empty.
+
 ## Conventions that avoid conflicts
 
 Bundles collide when two of them claim the same item. Cheap habits that prevent it:
@@ -293,6 +314,11 @@ Bundles collide when two of them claim the same item. Cheap habits that prevent 
   merges additively; settings keys are exclusive.
 - **Keep one concern per bundle.** Users install and uninstall at bundle
   granularity, so a bundle bundling unrelated things forces all-or-nothing.
+- **Refer to your MCP servers by name, plainly.** When a user hits a name clash
+  they can install your server under a different name, and `hcm` rewrites the
+  mentions in the rest of your bundle to match. That works on `mcp__<name>__tool`
+  prefixes and on the bare name; it cannot follow a name you assembled at
+  runtime or split across a line break.
 
-`hcm install` fails with the owning bundle named when a conflict is detected, so
-collisions surface at install time rather than as silent overwrites.
+A conflict is never resolved silently: `hcm install` asks, naming the owning
+bundle where there is one, and writes nothing until you answer.

@@ -32,9 +32,20 @@ export async function applyPlan(plan: InstallPlan): Promise<Receipt[]> {
       for (const action of actions) {
         if (action.payload.kind !== 'file') continue;
         const { contents } = action.payload;
-        if (typeof contents === 'string') await writeText(absolutePath, contents);
-        else await writeBytes(absolutePath, contents);
-        receipts.push({ op: 'file', path: relativePath, hash: sha256(contents) });
+
+        // An adopted file is already byte-identical, so writing it would only
+        // change its mtime -- and the receipt must say we do not own it.
+        if (!action.adopt) {
+          if (typeof contents === 'string') await writeText(absolutePath, contents);
+          else await writeBytes(absolutePath, contents);
+        }
+
+        receipts.push({
+          op: 'file',
+          path: relativePath,
+          hash: sha256(contents),
+          ...(action.adopt ? { preexisting: true } : {}),
+        });
       }
       continue;
     }
@@ -84,13 +95,31 @@ async function applyJson(
   relativePath: string,
   actions: PlanAction[],
 ): Promise<Receipt[]> {
+  const existed = await pathExists(absolutePath);
   const doc: JsonObject = (await readJsonIfExists<JsonObject>(absolutePath)) ?? {};
   const receipts: Receipt[] = [];
+  let changed = !existed;
 
   for (const action of actions) {
     if (action.payload.kind === 'json-value') {
       const { pointer, value } = action.payload;
+
+      // Adopting: the key already holds exactly this value, so leave the
+      // document (and its formatting) untouched and record it as not ours.
+      if (action.adopt) {
+        receipts.push({
+          op: 'json-value',
+          path: relativePath,
+          pointer,
+          hash: hashValue(value),
+          hadPrevious: false,
+          preexisting: true,
+        });
+        continue;
+      }
+
       const result = setAtPointer(doc, pointer, value);
+      changed = true;
 
       // Replacing a value with an identical one is a reinstall, not an
       // overwrite -- recording it as one would resurrect the key on uninstall.
@@ -110,6 +139,7 @@ async function applyJson(
     if (action.payload.kind === 'json-array-item') {
       const { pointer, items } = action.payload;
       const result = appendArrayItems(doc, pointer, items);
+      if (result.appended.length > 0) changed = true;
       receipts.push({
         op: 'json-array-item',
         path: relativePath,
@@ -120,6 +150,8 @@ async function applyJson(
     }
   }
 
-  await writeJson(absolutePath, doc);
+  // A pass that only adopted existing values has nothing to write; rewriting
+  // would reformat a file we were asked to leave alone.
+  if (changed) await writeJson(absolutePath, doc);
   return receipts;
 }

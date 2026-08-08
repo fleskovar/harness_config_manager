@@ -34,7 +34,9 @@ async function makeBundle(name: string, serverName: string, permission: string):
   const files: Record<string, string> = {
     'hcm.yaml': `name: ${name}\nversion: 1.0.0\ndescription: test bundle\n`,
     [`subagents/${name}-reviewer.md`]: `---\ndescription: Reviews code\ntools: [Read, Grep]\n---\n\nReview the code.\n`,
-    'rules/typescript.md': `---\ndescription: TS conventions\nappliesTo: ["**/*.ts"]\n---\n\n- Prefer named exports.\n`,
+    // Named per bundle: two bundles shipping the same rule file is a genuine
+    // collision, and these tests are about the ones that are not.
+    [`rules/${name}-typescript.md`]: `---\ndescription: TS conventions\nappliesTo: ["**/*.ts"]\n---\n\n- Prefer named exports.\n`,
     'context/project.md': `## ${name}\n\nInstructions from ${name}.\n`,
     'mcp/placeholder.json': JSON.stringify({ command: serverName, args: ['--serve'] }),
     'settings/settings.json': JSON.stringify({ permissions: { allow: [permission] } }),
@@ -55,13 +57,18 @@ async function makeBundle(name: string, serverName: string, permission: string):
   return root;
 }
 
+/**
+ * Install and record it, exactly as `hcm install` does -- the ledger is what
+ * tells a later install "you wrote this", so leaving it out would make every
+ * reinstall look like an adoption of somebody else's file.
+ */
 async function install(bundleRoot: string, target: TargetId): Promise<InstallationRecord> {
   const bundle = await loadBundle(bundleRoot);
   const plan = await buildPlan(bundle, target, 'project', projectDir);
   expect(plan.conflicts).toEqual([]);
   const receipts = await applyPlan(plan);
 
-  return {
+  const record: InstallationRecord = {
     id: installationId(bundle.manifest.name, target, 'project'),
     bundle: bundle.manifest.name,
     version: bundle.manifest.version,
@@ -71,6 +78,9 @@ async function install(bundleRoot: string, target: TargetId): Promise<Installati
     installedAt: new Date().toISOString(),
     receipts,
   };
+
+  await upsertInstallation('project', projectDir, record);
+  return record;
 }
 
 const readJson = async (relative: string): Promise<Record<string, unknown>> =>
@@ -294,10 +304,10 @@ describe('reasonix target', () => {
     const alpha = await makeBundle('alpha', 'alpha-server', 'Read(**)');
     await install(alpha, 'reasonix');
 
-    expect(await exists('.reasonix/rules/typescript.md')).toBe(false);
+    expect(await exists('.reasonix/rules/alpha-typescript.md')).toBe(false);
 
     const md = await readText('REASONIX.md');
-    expect(md).toContain('<!-- hcm:begin alpha/rules/typescript -->');
+    expect(md).toContain('<!-- hcm:begin alpha/rules/alpha-typescript -->');
     expect(md).toContain('**Applies to:** `**/*.ts`');
     expect(md).toContain('- Prefer named exports.');
     // The context doc keeps its own block alongside it.

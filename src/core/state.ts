@@ -11,6 +11,7 @@ import { stateFile } from './paths.js';
 import {
   type InstallationRecord,
   installationId,
+  isPreexisting,
   type Receipt,
   type Scope,
   type StateFile,
@@ -86,11 +87,39 @@ export async function ownershipIndex(
     if (record.target !== target) continue;
     if (excludeBundle && record.bundle === excludeBundle) continue;
     for (const receipt of record.receipts) {
+      // Adopted items were not created by that bundle, so it has no claim on
+      // them -- another bundle may adopt the same item quite happily.
+      if (isPreexisting(receipt)) continue;
       for (const key of ownershipKeys(receipt)) index.set(key, record.bundle);
     }
   }
 
   return index;
+}
+
+/**
+ * The items *this* bundle already owns in this scope+target, keyed the same way
+ * as `ownershipIndex`. Reinstalling over your own untouched item is a
+ * replacement, not a conflict -- which is what makes `hcm update` work without
+ * `--force` while a hand-edited item still stops it.
+ */
+export async function ownedReceipts(
+  scope: Scope,
+  cwd: string,
+  target: TargetId,
+  bundle: string,
+): Promise<Map<string, Receipt>> {
+  const state = await readState(scope, cwd);
+  const owned = new Map<string, Receipt>();
+
+  for (const record of state.installations) {
+    if (record.target !== target || record.bundle !== bundle) continue;
+    for (const receipt of record.receipts) {
+      for (const key of ownershipKeys(receipt)) owned.set(key, receipt);
+    }
+  }
+
+  return owned;
 }
 
 /** The ownership keys a receipt claims. Arrays claim each item separately. */

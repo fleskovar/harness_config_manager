@@ -37,6 +37,16 @@ export async function readTextIfExists(target: string): Promise<string | undefin
   }
 }
 
+/** Raw bytes, for content that would not survive a round trip through UTF-8. */
+export async function readBytesIfExists(target: string): Promise<Buffer | undefined> {
+  try {
+    return await fs.readFile(target);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
 export async function readJsonIfExists<T>(target: string): Promise<T | undefined> {
   const text = await readTextIfExists(target);
   if (text === undefined) return undefined;
@@ -139,6 +149,31 @@ export async function copyFile(from: string, to: string): Promise<string[]> {
   const created = await ensureDir(path.dirname(to));
   await fs.copyFile(from, to);
   return created;
+}
+
+/**
+ * Recursively copy a directory. `skip` names directories to leave behind --
+ * a bundle's own `.git` or `node_modules` are not part of the bundle.
+ * Symlinks are copied as links rather than followed, so a cycle cannot hang us.
+ */
+export async function copyDir(from: string, to: string, skip: string[] = []): Promise<void> {
+  const skipped = new Set(skip);
+  await fs.mkdir(to, { recursive: true });
+
+  for (const entry of await fs.readdir(from, { withFileTypes: true })) {
+    if (skipped.has(entry.name)) continue;
+    const source = path.join(from, entry.name);
+    const destination = path.join(to, entry.name);
+
+    if (entry.isDirectory()) await copyDir(source, destination, skip);
+    else if (entry.isSymbolicLink()) await fs.symlink(await fs.readlink(source), destination);
+    else if (entry.isFile()) await fs.copyFile(source, destination);
+  }
+}
+
+/** Remove a directory and everything under it. Missing is not an error. */
+export async function removeDir(target: string): Promise<void> {
+  await fs.rm(target, { recursive: true, force: true });
 }
 
 export { fs };

@@ -4,6 +4,7 @@
  */
 
 import path from 'node:path';
+import type { ConflictPolicy, Resolution } from '../core/conflicts.js';
 import { HcmError } from '../core/errors.js';
 import { readTextIfExists } from '../core/fsx.js';
 import { color, log } from '../core/logger.js';
@@ -17,6 +18,7 @@ export interface ImportOptions {
   targets?: string[];
   scope: Scope;
   force?: boolean;
+  onConflict?: ConflictPolicy;
   dryRun?: boolean;
   cwd: string;
 }
@@ -64,12 +66,16 @@ export async function importCommand(file: string | undefined, options: ImportOpt
 
   if (options.install && registered.length > 0) {
     log.info('');
+    // One memory of conflict answers across every bundle in the file.
+    const decisions = new Map<string, Resolution>();
     for (const name of registered) {
       await installCommand(name, {
         scope: options.scope,
         cwd: options.cwd,
+        decisions,
         ...(options.targets ? { targets: options.targets } : {}),
         ...(options.force ? { force: true } : {}),
+        ...(options.onConflict ? { onConflict: options.onConflict } : {}),
         ...(options.dryRun ? { dryRun: true } : {}),
       });
     }

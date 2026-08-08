@@ -15,14 +15,18 @@ import { listCommand } from './commands/list.js';
 import {
   registryAddCommand,
   registryListCommand,
+  registryOpenCommand,
   registryRemoveCommand,
 } from './commands/registry.js';
 import { statusCommand } from './commands/status.js';
 import { targetsCommand } from './commands/targets.js';
 import { uninstallCommand } from './commands/uninstall.js';
+import { updateCommand } from './commands/update.js';
 import { validateCommand } from './commands/validate.js';
+import type { ConflictPolicy } from './core/conflicts.js';
 import { ConflictError, HcmError } from './core/errors.js';
 import { color, configureLogger, log } from './core/logger.js';
+import { closePrompt } from './core/prompt.js';
 import type { Scope } from './core/types.js';
 import { TARGET_IDS } from './targets/index.js';
 
@@ -49,14 +53,25 @@ const scopeOption = () =>
 const targetOption = () =>
   new Option('-t, --target <target...>', 'target harness(es)').choices(TARGET_IDS);
 
+/**
+ * Without this, a conflict asks -- when there is a terminal to ask at, and
+ * otherwise errors out, which is what scripts and CI want by default.
+ */
+const conflictOption = () =>
+  new Option(
+    '--on-conflict <policy>',
+    'what to do when an item is already there: ask, keep the existing one, replace it, or stop',
+  ).choices(['prompt', 'skip', 'overwrite', 'abort']);
+
 program
   .command('install')
   .argument('<bundle>', 'registered name, local path, GitHub URL, or owner/repo[/subdir][#ref]')
   .description('install a bundle into one or more harnesses')
   .addOption(targetOption())
   .addOption(scopeOption())
+  .addOption(conflictOption())
   .option('--dry-run', 'show what would change without writing')
-  .option('--force', 'overwrite conflicting items')
+  .option('--force', 'overwrite conflicting items (same as --on-conflict overwrite)')
   .option('--refresh', 're-download a GitHub bundle instead of using the cache')
   .action(async (bundle, options) => {
     await installCommand(bundle, {
@@ -64,6 +79,7 @@ program
       scope: options.scope as Scope,
       dryRun: options.dryRun,
       force: options.force,
+      onConflict: options.onConflict as ConflictPolicy | undefined,
       refresh: options.refresh,
       cwd,
     });
@@ -84,6 +100,28 @@ program
       scope: options.scope as Scope,
       dryRun: options.dryRun,
       force: options.force,
+      cwd,
+    });
+  });
+
+program
+  .command('update')
+  .argument('<bundle>', 'registered name or id, or "all"')
+  .description('re-read a registered bundle and reinstall it wherever it is installed')
+  .addOption(targetOption())
+  .addOption(
+    new Option('-s, --scope <scope>', 'scopes to update').choices(['project', 'user', 'all']),
+  )
+  .addOption(conflictOption())
+  .option('--dry-run', 'show what would change without writing')
+  .option('--force', 'replace items that were edited since install')
+  .action(async (bundle, options) => {
+    await updateCommand(bundle, {
+      targets: options.target,
+      scope: options.scope as Scope | 'all' | undefined,
+      dryRun: options.dryRun,
+      force: options.force,
+      onConflict: options.onConflict as ConflictPolicy | undefined,
       cwd,
     });
   });
@@ -176,6 +214,7 @@ program
   .option('-i, --install', 'also install each bundle after registering it')
   .addOption(targetOption())
   .addOption(scopeOption())
+  .addOption(conflictOption())
   .option('--dry-run', 'with --install, show what would change without writing')
   .option('--force', 'with --install, overwrite conflicting items')
   .action(async (file, options) => {
@@ -184,6 +223,7 @@ program
       targets: options.target,
       scope: options.scope as Scope,
       force: options.force,
+      onConflict: options.onConflict as ConflictPolicy | undefined,
       dryRun: options.dryRun,
       cwd,
     });
@@ -230,17 +270,18 @@ registry
   .command('add')
   .argument('<source>', 'local path, GitHub URL (web, clone or SSH), or owner/repo[/subdir][#ref]')
   .option('-n, --name <name>', 'override the registered name')
-  .description('register a bundle so it can be installed by name')
+  .option('--dev', 'read a local bundle in place, so edits apply without re-registering')
+  .description('register a bundle so it can be installed by name or id')
   .action(async (source, options) => {
-    await registryAddCommand(source, { name: options.name, cwd });
+    await registryAddCommand(source, { name: options.name, dev: options.dev, cwd });
   });
 
 registry
   .command('remove')
-  .argument('<name>', 'registered bundle name')
-  .description('forget a bundle (does not uninstall it)')
-  .action(async (name) => {
-    await registryRemoveCommand(name);
+  .argument('<bundle...>', 'registered bundle name(s) or id(s)')
+  .description('unregister a bundle and delete its stored copy')
+  .action(async (bundles) => {
+    await registryRemoveCommand(bundles, { cwd });
   });
 
 registry
@@ -249,6 +290,15 @@ registry
   .description('list registered bundles')
   .action(async (options) => {
     await registryListCommand({ json: options.json });
+  });
+
+registry
+  .command('open')
+  .argument('[bundle]', 'open one bundle’s folder instead of the whole store')
+  .option('--no-open', 'print the path without launching a file manager')
+  .description('show where registered bundles are stored, and open it')
+  .action(async (bundle, options) => {
+    await registryOpenCommand(bundle, { open: options.open });
   });
 
 async function main(): Promise<void> {
@@ -270,6 +320,8 @@ async function main(): Promise<void> {
     log.error((error as Error).message);
     if (process.env.HCM_DEBUG) console.error(error);
     process.exitCode = 1;
+  } finally {
+    closePrompt();
   }
 }
 

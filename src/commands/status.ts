@@ -33,6 +33,7 @@ export async function statusCommand(options: StatusOptions): Promise<void> {
 
       const missing = results.filter((result) => result.status === 'missing');
       const modified = results.filter((result) => result.status === 'modified');
+      const adopted = results.filter((result) => result.status === 'kept');
       total += results.length;
       drifted += missing.length + modified.length;
 
@@ -40,8 +41,10 @@ export async function statusCommand(options: StatusOptions): Promise<void> {
         missing.length === 0 && modified.length === 0
           ? color.green('ok')
           : color.yellow(`${modified.length} modified, ${missing.length} missing`);
+      const adoptedNote =
+        adopted.length > 0 ? color.dim(`  (${adopted.length} adopted)`) : '';
 
-      log.plain(`  ${color.bold(record.bundle)} → ${record.target}  ${summary}`);
+      log.plain(`  ${color.bold(record.bundle)} → ${record.target}  ${summary}${adoptedNote}`);
 
       for (const result of [...modified, ...missing]) {
         log.plain(`    ${color.dim(result.status)} ${describeReceipt(result.receipt)}`);
