@@ -11,11 +11,18 @@ import { toList } from './types.js';
  * Reasonix.
  * https://github.com/esengine/DeepSeek-Reasonix/blob/main-v2/docs/GUIDE.md
  * Config schema: docs/SPEC.md section 5 (Configuration TOML).
+ * Paths: docs/CONFIG_PATHS.md. Subagents: docs/SUBAGENT_PROFILES.md.
  *
- *   .reasonix/agents/<name>.md      reasonix.toml -> [[plugins]] (MCP)
- *   .reasonix/skills/<name>/**      REASONIX.md   -> marker block
- *   .reasonix/commands/<name>.md    reasonix.toml -> [tables] (settings)
- *   .reasonix/rules/<name>.md
+ *   .reasonix/skills/<name>/**      REASONIX.md   -> marker block (context, rules)
+ *   .reasonix/commands/<name>.md    reasonix.toml -> [[plugins]] (MCP)
+ *                                   reasonix.toml -> [tables] (settings)
+ *
+ * Two things differ from the other harnesses:
+ *
+ *  - There is no agents directory. A subagent is a Skill carrying
+ *    `runAs: subagent`, so subagents and skills share `skills/`.
+ *  - There is no per-file rule format either -- standing instructions are the
+ *    REASONIX.md hierarchy -- so rules join context in REASONIX.md.
  *
  * Reasonix keeps its config in TOML, which has comments -- so unlike the JSON
  * targets we write marker-delimited blocks and never rewrite the whole file.
@@ -36,13 +43,22 @@ export const reasonix: Target = {
     const configFile = ctx.scope === 'user' ? 'config.toml' : 'reasonix.toml';
 
     switch (resource.kind) {
+      // A subagent profile is a Skill with `runAs: subagent` -- same directory,
+      // same file format, distinguished only by frontmatter. `invocation: manual`
+      // keeps it out of the pinned Skill index so it is only ever called by name.
       case 'subagent':
         return [
-          markdownFile(`${base}agents/${resource.name}.md`, resource, {
+          markdownFile(`${base}skills/${resource.name}/SKILL.md`, resource, {
             name: resource.name,
             description: resource.frontmatter.description,
-            tools: listOrUndefined(resource.frontmatter.tools),
+            color: resource.frontmatter.color,
+            invocation: 'manual',
+            runAs: 'subagent',
             model: resource.frontmatter.model,
+            effort: resource.frontmatter.effort,
+            'read-only': resource.frontmatter.readOnly ?? resource.frontmatter['read-only'],
+            // A profile-level allowlist, written as a YAML list.
+            'allowed-tools': listOrUndefined(resource.frontmatter.tools),
           }),
         ];
 
@@ -57,29 +73,19 @@ export const reasonix: Target = {
           }),
         ];
 
+      // Reasonix has no glob-scoped rule files: standing instructions are the
+      // REASONIX.md hierarchy, scoped by directory. So a rule becomes a block in
+      // REASONIX.md whose globs are stated in the text for the model to honour.
       case 'rule': {
         const paths = toList(resource.frontmatter.appliesTo ?? resource.frontmatter.paths);
+        const scope = paths.length ? `**Applies to:** ${paths.map((p) => `\`${p}\``).join(', ')}\n\n` : '';
         return [
-          markdownFile(`${base}rules/${resource.name}.md`, resource, {
-            description: resource.frontmatter.description,
-            paths: paths.length ? paths : undefined,
-          }),
+          standingInstructions(ctx, `rules/${resource.name}`, resource.name, scope + (resource.body ?? '')),
         ];
       }
 
       case 'context':
-        return [
-          {
-            path: 'REASONIX.md',
-            describe: `REASONIX.md ← ${resource.name}`,
-            payload: {
-              kind: 'block',
-              blockId: blockId(ctx.bundle, resource.name),
-              syntax: 'markdown',
-              body: resource.body ?? '',
-            },
-          },
-        ];
+        return [standingInstructions(ctx, resource.name, resource.name, resource.body ?? '')];
 
       case 'mcp':
         return [
@@ -118,12 +124,35 @@ export const reasonix: Target = {
   },
 };
 
-/** Reasonix home: %AppData%\reasonix on Windows, ~/.reasonix elsewhere. */
+/**
+ * Reasonix home: %AppData%\reasonix on Windows, ~/.reasonix elsewhere,
+ * overridden by REASONIX_HOME (docs/CONFIG_PATHS.md).
+ */
 export function reasonixHome(): string {
+  if (process.env.REASONIX_HOME) return process.env.REASONIX_HOME;
   if (process.platform === 'win32' && process.env.APPDATA) {
     return path.join(process.env.APPDATA, 'reasonix');
   }
   return path.join(os.homedir(), '.reasonix');
+}
+
+/** One bundle's contribution to REASONIX.md, the standing-instruction file. */
+function standingInstructions(
+  ctx: TargetContext,
+  id: string,
+  name: string,
+  body: string,
+): PlanAction {
+  return {
+    path: 'REASONIX.md',
+    describe: `REASONIX.md ← ${name}`,
+    payload: {
+      kind: 'block',
+      blockId: blockId(ctx.bundle, id),
+      syntax: 'markdown',
+      body,
+    },
+  };
 }
 
 function listOrUndefined(value: unknown): string[] | undefined {

@@ -45,11 +45,20 @@ You are a meticulous code reviewer...
 ```
 
 The filename is the subagent name unless frontmatter sets `name`. Write `tools` as a
-YAML list; `hcm` converts it to the comma-separated string Claude Code expects
-and leaves it a list for Copilot. The body becomes the system prompt.
+YAML list; `hcm` converts it to the comma-separated string Claude Code expects,
+leaves it a list for Copilot, and renames it `allowed-tools` for Reasonix. The
+body becomes the system prompt.
 
 The `description` is what the harness uses to decide when to delegate, so write
 it as *when to use this*, not *what this is*.
+
+Reasonix has no separate agents directory: a subagent profile is a skill carrying
+`runAs: subagent` and `invocation: manual`, so it installs to
+`.reasonix/skills/<name>/SKILL.md`. Subagents and skills therefore share one
+namespace there — don't give a subagent the same name as a skill in the same
+bundle, and `hcm validate` will tell you if you have. Two further Reasonix-only
+frontmatter keys are passed through when present: `effort` and `readOnly`
+(rendered as `read-only`, which strips writer tools).
 
 ### Skills — `skills/<name>/SKILL.md` plus supporting files
 
@@ -92,8 +101,24 @@ appliesTo:
 ```
 
 `appliesTo` is the canonical field. It becomes `paths:` for Claude Code and
-Reasonix, and `applyTo: '**/*.ts, **/*.tsx'` for Copilot. Omit it and the rule
-loads at session start everywhere (Copilot gets `applyTo: '**'`).
+`applyTo: '**/*.ts, **/*.tsx'` for Copilot. Omit it and the rule loads at session
+start everywhere (Copilot gets `applyTo: '**'`).
+
+Reasonix is the exception: its standing instructions are the `REASONIX.md`
+hierarchy, scoped by directory rather than by glob, so a rule is appended to
+`REASONIX.md` as a marker block with its globs stated in prose:
+
+```markdown
+<!-- hcm:begin my-kit/rules/typescript -->
+**Applies to:** `**/*.ts`, `**/*.tsx`
+
+- Prefer named exports.
+<!-- hcm:end my-kit/rules/typescript -->
+```
+
+That means a Reasonix rule costs context in every session, the way `context/`
+does. Keep rules short, or prefer `context/` when the instruction is universal
+anyway.
 
 ### Context — `context/<name>.md`
 

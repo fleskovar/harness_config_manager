@@ -4,10 +4,10 @@ A sample bundle showing every resource kind `hcm` understands.
 
 | Resource | File | Becomes |
 | --- | --- | --- |
-| subagent | `subagents/code-reviewer.md` | `.claude/agents/`, `.github/agents/`, `.reasonix/agents/` |
+| subagent | `subagents/code-reviewer.md` | `.claude/agents/`, `.github/agents/`, `.reasonix/skills/` (as `runAs: subagent`) |
 | skill | `skills/dependency-audit/` | `.claude/skills/`, `.github/skills/`, `.reasonix/skills/` |
 | command | `commands/review-pr.md` | `.claude/commands/`, `.github/prompts/`, `.reasonix/commands/` |
-| rule | `rules/typescript.md` | `.claude/rules/`, `.github/instructions/`, `.reasonix/rules/` |
+| rule | `rules/typescript.md` | `.claude/rules/`, `.github/instructions/`, `REASONIX.md` |
 | context | `context/conventions.md` | `CLAUDE.md`, `.github/copilot-instructions.md`, `REASONIX.md` |
 | mcp | `mcp/filesystem.json` | `.mcp.json`, `.vscode/mcp.json`, `reasonix.toml` |
 | settings | `settings/settings.json` | `.claude/settings.json`, `.github/copilot/settings.json`, `reasonix.toml` |

@@ -27,13 +27,14 @@ afterEach(async () => {
   await fs.rm(workspace, { recursive: true, force: true });
 });
 
-/** Write a minimal bundle with a subagent, a context doc, an MCP server and settings. */
+/** Write a minimal bundle with a subagent, a rule, a context doc, an MCP server and settings. */
 async function makeBundle(name: string, serverName: string, permission: string): Promise<string> {
   const root = path.join(workspace, name);
 
   const files: Record<string, string> = {
     'hcm.yaml': `name: ${name}\nversion: 1.0.0\ndescription: test bundle\n`,
     [`subagents/${name}-reviewer.md`]: `---\ndescription: Reviews code\ntools: [Read, Grep]\n---\n\nReview the code.\n`,
+    'rules/typescript.md': `---\ndescription: TS conventions\nappliesTo: ["**/*.ts"]\n---\n\n- Prefer named exports.\n`,
     'context/project.md': `## ${name}\n\nInstructions from ${name}.\n`,
     'mcp/placeholder.json': JSON.stringify({ command: serverName, args: ['--serve'] }),
     'settings/settings.json': JSON.stringify({ permissions: { allow: [permission] } }),
@@ -266,11 +267,41 @@ describe('reasonix target', () => {
     expect(toml).toContain('# hcm:begin alpha/plugins/alpha-server');
     expect(toml).toContain('[[plugins]]');
     expect(toml).toContain('name = "alpha-server"');
-    expect(await exists('.reasonix/agents/alpha-reviewer.md')).toBe(true);
     expect(await exists('REASONIX.md')).toBe(true);
 
     await rollback(record, projectDir);
     expect(await exists('reasonix.toml')).toBe(false);
+  });
+
+  it('installs a subagent as a manual skill, not an agents file', async () => {
+    const alpha = await makeBundle('alpha', 'alpha-server', 'Read(**)');
+    const record = await install(alpha, 'reasonix');
+
+    // Reasonix has no agents directory: a profile is a Skill with runAs: subagent.
+    expect(await exists('.reasonix/agents/alpha-reviewer.md')).toBe(false);
+
+    const profile = await readText('.reasonix/skills/alpha-reviewer/SKILL.md');
+    expect(profile).toContain('runAs: subagent');
+    expect(profile).toContain('invocation: manual');
+    // A profile-level allowlist, kept as a YAML list.
+    expect(profile).toMatch(/allowed-tools:\s*\n\s*- Read\n\s*- Grep/);
+
+    await rollback(record, projectDir);
+    expect(await exists('.reasonix/skills/alpha-reviewer/SKILL.md')).toBe(false);
+  });
+
+  it('folds rules into REASONIX.md, which has no per-rule file format', async () => {
+    const alpha = await makeBundle('alpha', 'alpha-server', 'Read(**)');
+    await install(alpha, 'reasonix');
+
+    expect(await exists('.reasonix/rules/typescript.md')).toBe(false);
+
+    const md = await readText('REASONIX.md');
+    expect(md).toContain('<!-- hcm:begin alpha/rules/typescript -->');
+    expect(md).toContain('**Applies to:** `**/*.ts`');
+    expect(md).toContain('- Prefer named exports.');
+    // The context doc keeps its own block alongside it.
+    expect(md).toContain('<!-- hcm:begin alpha/project -->');
   });
 
   it('preserves hand-written TOML around its block', async () => {

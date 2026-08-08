@@ -74,10 +74,10 @@ harness's home directory (`hcm targets` prints the exact paths on your machine).
 
 | Kind | Claude Code | GitHub Copilot | Reasonix |
 | --- | --- | --- | --- |
-| subagent | `.claude/agents/<n>.md` | `.github/agents/<n>.agent.md` | `.reasonix/agents/<n>.md` |
+| subagent | `.claude/agents/<n>.md` | `.github/agents/<n>.agent.md` | `.reasonix/skills/<n>/SKILL.md` |
 | skill | `.claude/skills/<n>/` | `.github/skills/<n>/` | `.reasonix/skills/<n>/` |
 | command | `.claude/commands/<n>.md` | `.github/prompts/<n>.prompt.md` | `.reasonix/commands/<n>.md` |
-| rule | `.claude/rules/<n>.md` | `.github/instructions/<n>.instructions.md` | `.reasonix/rules/<n>.md` |
+| rule | `.claude/rules/<n>.md` | `.github/instructions/<n>.instructions.md` | `REASONIX.md` |
 | context | `CLAUDE.md` | `.github/copilot-instructions.md` | `REASONIX.md` |
 | mcp | `.mcp.json` → `mcpServers.<n>` | `.vscode/mcp.json` → `servers.<n>` | `reasonix.toml` → `[[plugins]]` |
 | settings | `.claude/settings.json` | `.github/copilot/settings.json` | `reasonix.toml` |
@@ -88,13 +88,21 @@ Frontmatter is translated per target. A rule written once as:
 appliesTo: ["**/*.ts", "**/*.tsx"]
 ```
 
-becomes `paths: [...]` for Claude Code and Reasonix, and `applyTo: '**/*.ts, **/*.tsx'`
-for Copilot. Subagent `tools` become a comma-separated string for Claude Code and
-a YAML list for Copilot.
+becomes `paths: [...]` for Claude Code, `applyTo: '**/*.ts, **/*.tsx'` for
+Copilot, and — since Reasonix has no glob-scoped rule format — a line of prose
+above the rule text in `REASONIX.md`. Subagent `tools` become a comma-separated
+string for Claude Code, a YAML list for Copilot, and `allowed-tools` for
+Reasonix.
 
 Note the deliberate asymmetry: bundles say **subagent**, but each harness keeps
-its own word for the same thing — all three happen to call the directory
-`agents/`. `hcm` translates; you only learn one vocabulary.
+its own word — and its own filing system — for the same thing. Claude Code and
+Copilot each have an `agents/` directory; Reasonix has none, because there a
+subagent profile *is* a skill, marked `runAs: subagent` and `invocation: manual`
+so it is only invoked by name. `hcm` translates; you only learn one vocabulary.
+
+One consequence: on Reasonix a subagent and a skill share one namespace, and
+Reasonix refuses a profile whose name already belongs to another skill. Give
+them distinct names — `hcm validate` flags a bundle that does not.
 
 ## How rollback stays exact
 
