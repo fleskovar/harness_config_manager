@@ -4,7 +4,17 @@ description: Audit third-party dependencies for known vulnerabilities, unmaintai
 
 # Dependency audit
 
-Work through the checklist in `checklist.md`, then report what you found.
+Work through the checklist in `checklist.md`, then report what you found. Match
+the tone the reviewer uses in `subagents/code-reviewer.md`.
+
+Both are written from the bundle root, and `hcm` rewrites each one relative to
+wherever this file lands. The checklist is installed beside it and stays as
+written; the reviewer moves, so the second becomes:
+
+```
+Claude Code   ../../agents/code-reviewer.md
+Reasonix      ../code-reviewer/SKILL.md      (a subagent is a skill there)
+```
 
 ## Steps
 

@@ -8,7 +8,7 @@ A sample bundle showing every resource kind `hcm` understands.
 | skill | `skills/dependency-audit/` | `.claude/skills/`, `.github/skills/`, `.reasonix/skills/` |
 | command | `commands/review-pr.md` | `.claude/commands/`, `.github/prompts/`, `.reasonix/commands/` |
 | rule | `rules/typescript.md` | `.claude/rules/`, `.github/instructions/`, `REASONIX.md` |
-| context | `context/conventions.md` | `CLAUDE.md`, `.github/copilot-instructions.md`, `REASONIX.md` |
+| context | `context/10-conventions.md` | `CLAUDE.md`, `.github/copilot-instructions.md`, `REASONIX.md` |
 | mcp | `mcp/filesystem.json` | `.mcp.json`, `.vscode/mcp.json`, `reasonix.toml` |
 | settings | `settings/settings.json` | `.claude/settings.json`, `.github/copilot/settings.json`, `reasonix.toml` |
 

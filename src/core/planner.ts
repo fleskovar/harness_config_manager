@@ -8,6 +8,7 @@
 
 import { fromPosix, readBytesIfExists, readTextIfExists } from './fsx.js';
 import { hashValue, sha256 } from './hash.js';
+import { remapReferences } from './refmap.js';
 import { getTarget } from '../targets/index.js';
 import { hasBlock } from '../merge/blocks.js';
 import { getAtPointer } from '../merge/json-merge.js';
@@ -65,9 +66,24 @@ export async function buildPlan(
     actions.push(...resourceActions(target, resource, bundle.manifest.name, scope, targetOptions));
   }
 
-  const conflicts = await detectConflicts(actions, scopeRoot, bundle.manifest.name, cwd);
+  // References inside the bundle are written against the bundle's own layout,
+  // which this target is about to take apart -- so they are rewritten to point
+  // at where the files are actually going. Before conflict detection, so that
+  // hashes, receipts and --dry-run all describe the text that will be on disk.
+  const remap = remapReferences(bundle, actions);
+  const conflicts = await detectConflicts(remap.actions, scopeRoot, bundle.manifest.name, cwd);
 
-  return { bundle, target: targetId, scope, targetOptions, scopeRoot, actions, conflicts, skipped };
+  return {
+    bundle,
+    target: targetId,
+    scope,
+    targetOptions,
+    scopeRoot,
+    actions: remap.actions,
+    conflicts,
+    skipped,
+    references: { rewrites: remap.rewrites, dropped: remap.dropped },
+  };
 }
 
 /**

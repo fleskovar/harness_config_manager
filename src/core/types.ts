@@ -382,6 +382,18 @@ export interface PlanConflict {
   pointer?: string[];
 }
 
+/**
+ * What became of the bundle's internal file references on the way into this
+ * target -- see `core/refmap.ts`. Reported rather than silently applied: a
+ * reference that could not be remapped is one the agent will follow anyway.
+ */
+export interface PlanReferences {
+  /** Rewritten to match where the file landed. */
+  rewrites: { path: string; from: string; to: string }[];
+  /** Pointed at a bundle file this target does not install. */
+  dropped: { path: string; ref: string; reason: string }[];
+}
+
 export interface InstallPlan {
   bundle: LoadedBundle;
   target: TargetId;
@@ -393,4 +405,6 @@ export interface InstallPlan {
   actions: PlanAction[];
   conflicts: PlanConflict[];
   skipped: { resource: BundleResource; reason: string }[];
+  /** Absent on plans built before references were remapped. */
+  references?: PlanReferences;
 }

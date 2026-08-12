@@ -373,6 +373,147 @@ Throughout, the install receipts are kept in step: after `hcm context remove`,
 `hcm status` does not report the blocks as damage, and after `append` it counts
 them as present again.
 
+## References: written once, repointed on the way in
+
+A bundle's files talk about each other. A `SKILL.md` says to work through
+`checklist.md`; a command points at the skill; an MCP server's args name a
+script under `assets/`. Installation takes that layout apart and files each
+piece under a different harness's conventions — so a path written against the
+bundle is wrong in every target, and wrong differently in each.
+
+So write references **against the bundle's own layout**, from its root:
+
+```markdown
+Follow the checklist at `skills/dependency-audit/checklist.md`.
+See [the reviewer](subagents/code-reviewer.md) for the tone to use.
+```
+
+and `hcm` rewrites them as it installs, to wherever those files actually went:
+
+| Written in the bundle | Claude Code | Reasonix |
+| --- | --- | --- |
+| `subagents/code-reviewer.md` | `.claude/agents/code-reviewer.md` | `.reasonix/skills/code-reviewer/SKILL.md` |
+| `skills/audit/checklist.md` | `.claude/skills/audit/checklist.md` | `.reasonix/skills/audit/checklist.md` |
+| `context/conventions.md` | `CLAUDE.md` | `REASONIX.md` |
+| `assets/run.sh` | `.claude/assets/run.sh` | `.reasonix/assets/run.sh` |
+
+What comes out is always **relative to the file doing the referring**:
+
+```
+.claude/skills/audit/SKILL.md  →  checklist.md              (same directory)
+.claude/commands/review.md     →  ../skills/audit/checklist.md
+.claude/skills/audit/SKILL.md  →  ../../agents/code-reviewer.md
+CLAUDE.md                      →  .claude/skills/audit/checklist.md
+```
+
+One rule, not two. A reference means the same thing to whoever reads the file it
+is written in, wherever that file ended up — the last line only looks like a
+rooted path because a context section lands at the scope root and has nothing to
+climb out of. It is why the same reference reads identically at project and user
+scope, even though the layouts differ: from `prompts/review.md` to
+`skills/audit/checklist.md` is `../skills/audit/checklist.md` either way.
+
+Both readings are accepted going in, bundle root first, so `checklist.md` next
+to a `SKILL.md` keeps working and nothing written before this needs changing.
+Markdown links, images, link definitions, inline code and `@paths` are all
+rewritten, in resource files *and* in context blocks, and so are whole string
+values in MCP and settings fragments — `"args": ["assets/run.sh"]` is repointed,
+while `"args": ["-c", "echo hi"]` is left alone.
+
+Nothing is guessed. A reference is rewritten only when it names a file the
+bundle ships *and* this target installs. One naming a file the target drops is
+left exactly as written and reported as a warning; one pointing outside the
+bundle — a URL, a path in the user's project — is never touched. `hcm info`
+prints the rewrites per target before you install anything, and `hcm install
+--verbose` prints them as it goes.
+
+> **One thing to watch in config values.** The rule holds wherever a path is
+> resolved against the file containing it, which is how the harnesses read the
+> markdown they load. A path inside a *config value* — an MCP server's `args`,
+> a hook command in `settings.json` — is resolved by the harness, usually
+> against the project root rather than against the config file. Where the config
+> sits at the scope root (`.mcp.json`, `opencode.json`, `reasonix.toml`) the two
+> agree and there is nothing to think about. Where it does not, they diverge:
+> Copilot's `.vscode/mcp.json` gets `../.github/assets/run.sh`, which is the
+> correct path *from that file* and not what a client launched in the project
+> root will open. Keep executable paths out of bundle-relative references, or
+> check `hcm info` before shipping.
+
+### Finding the ones that point at nothing
+
+```bash
+hcm refs check --path ./bundles          # report broken references
+hcm refs fix   --path ./bundles          # repair them, by picking from a list
+```
+
+`check` reads every markdown file and config under the path — one bundle or a
+whole collection — resolves each reference both ways, and reports what resolves
+neither way, with the files it probably meant:
+
+```
+ts-review-kit/README.md
+  ✖ line 11  context/conventions.md (code)
+      → context/10-conventions.md
+```
+
+`fix` puts the same thing in a JSON file, one entry per broken reference, each
+with the candidates ranked best first:
+
+```json
+{
+  "ts-review-kit/README.md": {
+    "original_ref": "context/conventions.md",
+    "new": ["context/10-conventions.md", "context/20-pull-requests.md"]
+  }
+}
+```
+
+Delete the wrong ones. **Leave exactly one entry in each `new` list**, save, and
+close the editor — every entry down to one choice is applied, and every entry
+still holding two or more is reported and left alone, so an unfinished pass
+cannot write something nobody picked. Entries are keyed by the file the
+reference is in; a file that broke several gets `#2`, `#3` suffixes, and
+`original_ref` is what actually identifies the reference.
+
+`$VISUAL` or `$EDITOR` decides the editor; GUI editors known to fork get
+`--wait` added, or the round trip would apply the file before you touched it.
+Two flags split it up when that is not what you want:
+
+```bash
+hcm refs fix --path ./bundles --write              # save hcm-refs.json here, stop
+hcm refs fix --path ./bundles --write fixes.json   # ...under a name of your choosing
+hcm refs fix --path ./bundles --file fixes.json    # apply one you edited earlier
+hcm refs fix --path ./bundles --file fixes.json --dry-run
+```
+
+Suggestions come from the files under the scanned path — the same bundle first,
+then sibling bundles and dependencies in the same folder. A suggestion from
+another bundle is marked, and never outranks one from the bundle doing the
+referring: it may not be installed alongside it, and it cannot be remapped if it
+is not.
+
+### What it will not report
+
+A bundle's prose is full of filenames it is not referring to. Reporting
+`package.json` as a broken reference in a skill that merely says to read one
+would make the report worthless, so:
+
+- **Fenced code blocks are skipped** — they are examples and shell sessions.
+- **URLs, anchors, absolute paths, `~/…` and `${VAR}` paths** are somebody
+  else's to resolve.
+- **Paths rooted at a hidden directory** — `.claude/agents/x.md`,
+  `.vscode/mcp.json` — describe where something lands *after* installation.
+  Bundles ship no hidden directories, so these are documentation, not references.
+- **Well-known project filenames** (`package.json`, `tsconfig.json`, `go.mod`,
+  lockfiles…) mentioned without a path.
+- **A bare filename with nothing similar in the tree** — `checklist.md` with no
+  candidate anywhere is prose, and there would be no fix to offer if it were
+  not. `--strict` reports these too.
+
+Anything written as a reference — a link, an image, a link definition — or
+containing a `/` is always reported. Nobody writes `skills/audit/checklist.md`
+as a turn of phrase.
+
 ## How rollback stays exact
 
 The hard part is that bundles share files. Two bundles both write into
@@ -500,6 +641,8 @@ hcm install my-kit --on-conflict prompt     # ask even where hcm would not have
 | `hcm context append [bundle...]` | Add back the sections that have gone missing. `-t`, `-s`, `--dry-run`, `--force` |
 | `hcm context override [bundle...]` | Clear the file and rewrite it from the cached sections. `-t`, `-s`, `--dry-run`, `--force` |
 | `hcm context remove [bundle...]` | Take the sections out, keeping the cached copies. `-t`, `-s`, `--dry-run` |
+| `hcm refs check` | Report file references that point at nothing. `-p/--path`, `--strict`, `--json` |
+| `hcm refs fix` | Repair them by picking from a ranked list. `-p/--path`, `--write [file]`, `--file <path>`, `--strict`, `--dry-run` |
 | `hcm validate [dir]` | Check a bundle for common mistakes |
 | `hcm init [dir]` | Scaffold a new bundle |
 | `hcm targets` | Supported harnesses and their paths on this machine |
@@ -777,6 +920,8 @@ src/
 │                       # deps.ts + semver.ts -- the dependency graph
 │                       # registry.ts + store.ts -- ids and the bundle snapshots
 │                       # context.ts -- the cached instruction sections
+│                       # refs.ts -- finding file references, and what they meant
+│                       # refmap.ts -- repointing them at the installed layout
 ├── merge/              # json-merge.ts, blocks.ts, toml.ts -- the receipt machinery
 └── targets/            # one adapter per harness
 bundles/ts-review-kit/  # sample bundle exercising every resource kind

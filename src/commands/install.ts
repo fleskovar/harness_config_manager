@@ -22,6 +22,7 @@ import {
   installationId,
   type InstalledDependency,
   type LoadedBundle,
+  type PlanReferences,
   type Scope,
   type TargetId,
   type TargetOptions,
@@ -295,6 +296,8 @@ export async function installInto(
     return;
   }
 
+  reportReferences(plan);
+
   for (const action of plan.actions) {
     const mark = action.adopt || action.share ? color.dim('=') : color.green('+');
     const note = action.adopt
@@ -348,6 +351,33 @@ export async function installInto(
   );
   if (cached > 0) {
     log.debug(`cached ${cached} context section(s) for "hcm context append"`);
+  }
+}
+
+/**
+ * What the reference remapper did.
+ *
+ * The rewrites are routine -- one line, only with `--verbose`. A reference the
+ * remapper could not follow is not routine: the file it names is not going into
+ * this harness, so the instruction stays in the text and points at nothing.
+ * That is worth a warning every time.
+ */
+function reportReferences(plan: { references?: PlanReferences }): void {
+  const references = plan.references;
+  if (!references) return;
+
+  for (const rewrite of references.rewrites) {
+    log.debug(`${rewrite.path}: ${rewrite.from} → ${rewrite.to}`);
+  }
+  if (references.rewrites.length > 0) {
+    const files = new Set(references.rewrites.map((rewrite) => rewrite.path)).size;
+    log.debug(
+      `remapped ${references.rewrites.length} file reference(s) across ${files} file(s)`,
+    );
+  }
+
+  for (const miss of references.dropped) {
+    log.warn(`  ${miss.path}: "${miss.ref}" ${miss.reason}`);
   }
 }
 

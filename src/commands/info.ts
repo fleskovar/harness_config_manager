@@ -72,6 +72,15 @@ async function describeBundle(
     for (const skip of plan.skipped) {
       log.plain(color.dim(`  (skipped ${skip.resource.name}: ${skip.reason})`));
     }
+
+    // Where this harness's layout forces a reference to be written differently
+    // -- the thing you cannot work out by reading the bundle.
+    for (const rewrite of plan.references?.rewrites ?? []) {
+      log.plain(color.dim(`  ↳ ${rewrite.path}: ${rewrite.from} → ${rewrite.to}`));
+    }
+    for (const miss of plan.references?.dropped ?? []) {
+      log.plain(color.yellow(`  ! ${miss.path}: "${miss.ref}" ${miss.reason}`));
+    }
     if (plan.conflicts.length > 0) {
       for (const conflict of plan.conflicts) {
         log.plain(color.yellow(`  ! ${conflict.path}: ${conflict.detail}`));

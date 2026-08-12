@@ -25,6 +25,7 @@ import {
   registryOpenCommand,
   registryRemoveCommand,
 } from './commands/registry.js';
+import { refsCheckCommand, refsFixCommand } from './commands/refs.js';
 import { statusCommand } from './commands/status.js';
 import { targetsCommand } from './commands/targets.js';
 import { uninstallCommand } from './commands/uninstall.js';
@@ -330,6 +331,63 @@ contextSubcommand('remove', 'take the sections out, keeping the cached copies')
   .option('--dry-run', 'show what would change without writing')
   .action(async (bundles, options) => {
     await contextRemoveCommand(bundles, contextOptions(options));
+  });
+
+/**
+ * `hcm refs` -- the file references a bundle's own text makes.
+ *
+ * `check` reports the ones that point at nothing; `fix` offers replacements and
+ * applies the ones you pick. Both take a folder rather than a bundle name: a
+ * reference is a fact about files on disk, and the folder may hold a whole
+ * collection whose bundles point at each other.
+ */
+const refs = program
+  .command('refs')
+  .description('find and repair broken file references in bundles');
+
+const refsPathOption = () =>
+  new Option('-p, --path <path>', 'folder to scan (a bundle, or a collection of them)').default('.');
+
+const strictOption = () =>
+  new Option(
+    '--strict',
+    'also report bare filenames that look like references but match nothing',
+  );
+
+refs
+  .command('check', { isDefault: true })
+  .description('report every file reference that points at nothing')
+  .addOption(refsPathOption())
+  .addOption(strictOption())
+  .option('--json', 'machine-readable output')
+  .action(async (options) => {
+    const ok = await refsCheckCommand({
+      path: options.path,
+      strict: options.strict,
+      json: options.json,
+      cwd,
+    });
+    if (!ok) process.exitCode = 1;
+  });
+
+refs
+  .command('fix')
+  .description('write the broken references to a JSON file, then apply what you leave in it')
+  .addOption(refsPathOption())
+  .addOption(strictOption())
+  .option('--write [file]', `save the JSON in the working directory instead of opening an editor`)
+  .option('--file <path>', 'apply an already-edited JSON file')
+  .option('--dry-run', 'show what would change without writing')
+  .action(async (options) => {
+    const ok = await refsFixCommand({
+      path: options.path,
+      strict: options.strict,
+      write: options.write,
+      file: options.file,
+      dryRun: options.dryRun,
+      cwd,
+    });
+    if (!ok) process.exitCode = 1;
   });
 
 const config = program.command('config').description('view and change hcm settings');

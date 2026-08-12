@@ -158,7 +158,9 @@ skills/dependency-audit/
 
 Every file in the directory is copied. `SKILL.md` is re-rendered so its
 frontmatter matches the target; supporting files are copied byte-for-byte.
-Reference them by relative path from `SKILL.md`.
+Reference them by relative path from `SKILL.md` — see
+[Referring to other files](#referring-to-other-files), which is also how to
+point at anything outside the skill's own directory.
 
 ### Commands — `commands/<name>.md`
 
@@ -357,6 +359,61 @@ without `hcm status` reporting drift.
 
 Copied verbatim into the harness directory. Use for scripts, templates and images
 that your subagents or skills reference.
+
+## Referring to other files
+
+Write paths **from the bundle root**, the way the bundle is laid out:
+
+```markdown
+Follow the checklist at `skills/dependency-audit/checklist.md`.
+See [the reviewer](subagents/code-reviewer.md) for the tone to use.
+Run `assets/scripts/audit.sh` first.
+```
+
+Do not write where the file will end up. `hcm` works that out per target and
+rewrites the reference as it installs, because there is no single answer:
+`subagents/code-reviewer.md` becomes `.claude/agents/code-reviewer.md` on Claude
+Code, `.github/agents/code-reviewer.agent.md` on Copilot, and
+`.reasonix/skills/code-reviewer/SKILL.md` on Reasonix — where a subagent is a
+skill. A `context/` file becomes a *section of* `CLAUDE.md`, `AGENTS.md` or
+`REASONIX.md`, and references to it are pointed at that file.
+
+What is written on the way out is always relative to the file doing the
+referring, so a file lands next to the neighbours it talks about:
+
+```
+.claude/skills/audit/SKILL.md  →  checklist.md              (same directory)
+.claude/commands/review.md     →  ../skills/audit/checklist.md
+.claude/skills/audit/SKILL.md  →  ../../agents/code-reviewer.md
+```
+
+A file that lands beside the one referring to it therefore keeps its plain name,
+and a skill's own supporting files read exactly as they always have:
+
+```markdown
+Work through `checklist.md`, then report what you found.
+```
+
+Both forms resolve going in, bundle root first. This works in markdown links,
+images, link definitions, inline code and `@paths`, and on whole string values in
+`mcp/` and `settings/` — `"args": ["assets/scripts/audit.sh"]` is repointed too,
+though a path a *harness* resolves rather than an agent is worth checking with
+`hcm info` first; see the note in the [README](../README.md#references-written-once-repointed-on-the-way-in).
+
+What is *not* rewritten: URLs, anchors, absolute paths, `${VAR}` paths, paths
+into the user's own project (`src/index.ts`), and anything inside a fenced code
+block. A reference naming a file this target does not install is left as written
+and reported — worth reading, because it is an instruction the agent will follow.
+
+Check the ones that point at nothing before you publish:
+
+```bash
+hcm refs check --path .        # report
+hcm refs fix   --path .        # repair, by picking from a ranked list
+```
+
+`hcm info <bundle>` prints the rewrites per target, so you can see what each
+harness will actually read.
 
 ## Sharing a bundle
 

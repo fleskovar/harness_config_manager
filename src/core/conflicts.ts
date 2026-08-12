@@ -22,6 +22,7 @@ import { AbortedError, ConflictError } from './errors.js';
 import { color, log } from './logger.js';
 import { detectConflicts, resourceActions } from './planner.js';
 import { isInteractive, select, text } from './prompt.js';
+import { remapReferences } from './refmap.js';
 import { NAME_PATTERN, rewriteReferences } from './rename.js';
 import { getTarget } from '../targets/index.js';
 import {
@@ -122,7 +123,14 @@ export async function resolvePlanConflicts(
     // one was regenerated, and rewriting it would also rename its command.
     const rewrite = rewriteReferences(kept, current.name, newName);
 
-    actions = [...rewrite.actions.slice(0, insertAt), ...fresh, ...rewrite.actions.slice(insertAt)];
+    const combined = [
+      ...rewrite.actions.slice(0, insertAt),
+      ...fresh,
+      ...rewrite.actions.slice(insertAt),
+    ];
+    // The regenerated writes have not been past the file-reference remapper --
+    // that runs once, in buildPlan -- so give just those the same treatment.
+    actions = remapReferences(plan.bundle, combined, fresh).actions;
     answered.add(key);
 
     return {
