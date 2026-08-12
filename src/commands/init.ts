@@ -20,7 +20,7 @@ export async function initCommand(
 version: 0.1.0
 description: A harness config bundle
 # Omit "targets" to support all of them.
-# targets: [claude-code, copilot, reasonix]
+# targets: [claude-code, copilot, reasonix, opencode, pi]
 `,
 
     'README.md': `# ${name}
@@ -61,11 +61,24 @@ appliesTo:
 - Keep functions under 50 lines.
 `,
 
-    'context/project.md': `## ${name}
+    // One file per section, numbered so the order in the instruction file is
+    // the order you see in the directory listing.
+    'context/10-project.md': `## ${name}
 
 Instructions that should load in every session go here. They are merged into
-CLAUDE.md / copilot-instructions.md / REASONIX.md inside a marker block, so
-uninstalling removes exactly this section.
+CLAUDE.md / copilot-instructions.md / REASONIX.md / AGENTS.md inside a marker
+block, so uninstalling removes exactly this section.
+
+Keep each file to one section and one subject: "hcm context append" restores
+them one at a time, so small sections survive an agent rewriting the file
+better than one long one.
+`,
+
+    'context/20-workflow.md': `## Workflow
+
+A second section, to show how the pieces fit together. Every file in
+\`context/\` becomes its own block, and the blocks are concatenated in filename
+order to form this bundle's part of the instruction file.
 `,
 
     'mcp/example-server.json': `{

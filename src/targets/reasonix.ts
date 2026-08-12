@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { BundleResource, PlanAction, Scope } from '../core/types.js';
 import { blockId } from '../merge/blocks.js';
 import { renderArrayOfTables, renderToml } from '../merge/toml.js';
-import { assetFile, markdownFile, skillFiles } from './shared.js';
+import { appliesToPrefix, assetFile, instructionBlock, markdownFile, skillFiles } from './shared.js';
 import type { Target, TargetContext } from './types.js';
 import { toList } from './types.js';
 
@@ -76,16 +76,21 @@ export const reasonix: Target = {
       // Reasonix has no glob-scoped rule files: standing instructions are the
       // REASONIX.md hierarchy, scoped by directory. So a rule becomes a block in
       // REASONIX.md whose globs are stated in the text for the model to honour.
-      case 'rule': {
-        const paths = toList(resource.frontmatter.appliesTo ?? resource.frontmatter.paths);
-        const scope = paths.length ? `**Applies to:** ${paths.map((p) => `\`${p}\``).join(', ')}\n\n` : '';
+      case 'rule':
         return [
-          standingInstructions(ctx, `rules/${resource.name}`, resource.name, scope + (resource.body ?? '')),
+          instructionBlock(
+            'REASONIX.md',
+            ctx,
+            `rules/${resource.name}`,
+            resource.name,
+            appliesToPrefix(resource) + (resource.body ?? ''),
+          ),
         ];
-      }
 
       case 'context':
-        return [standingInstructions(ctx, resource.name, resource.name, resource.body ?? '')];
+        return [
+          instructionBlock('REASONIX.md', ctx, resource.name, resource.name, resource.body ?? ''),
+        ];
 
       case 'mcp':
         return [
@@ -134,25 +139,6 @@ export function reasonixHome(): string {
     return path.join(process.env.APPDATA, 'reasonix');
   }
   return path.join(os.homedir(), '.reasonix');
-}
-
-/** One bundle's contribution to REASONIX.md, the standing-instruction file. */
-function standingInstructions(
-  ctx: TargetContext,
-  id: string,
-  name: string,
-  body: string,
-): PlanAction {
-  return {
-    path: 'REASONIX.md',
-    describe: `REASONIX.md ← ${name}`,
-    payload: {
-      kind: 'block',
-      blockId: blockId(ctx.bundle, id),
-      syntax: 'markdown',
-      body,
-    },
-  };
 }
 
 function listOrUndefined(value: unknown): string[] | undefined {

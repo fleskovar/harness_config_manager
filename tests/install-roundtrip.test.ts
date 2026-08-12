@@ -332,6 +332,138 @@ describe('reasonix target', () => {
   });
 });
 
+describe('opencode target', () => {
+  it('maps resources onto the .opencode layout', async () => {
+    const alpha = await makeBundle('alpha', 'alpha-server', 'Read(**)');
+    await install(alpha, 'opencode');
+
+    const agent = await readText('.opencode/agents/alpha-reviewer.md');
+    // Without mode: subagent this would define a primary agent instead.
+    expect(agent).toContain('mode: subagent');
+    // OpenCode gates tools through a permission object, not a name list.
+    expect(agent).not.toContain('tools:');
+
+    // Context goes to AGENTS.md, the file OpenCode actually reads.
+    expect(await readText('AGENTS.md')).toContain('Instructions from alpha.');
+  });
+
+  it('writes MCP servers in OpenCode’s own shape', async () => {
+    const alpha = await makeBundle('alpha', 'alpha-server', 'Read(**)');
+    await install(alpha, 'opencode');
+
+    const mcp = (await readJson('opencode.json')).mcp as Record<string, unknown>;
+    // command + args collapse into one argv array, and the transport is named.
+    expect(mcp['alpha-server']).toEqual({
+      type: 'local',
+      command: ['alpha-server', '--serve'],
+    });
+  });
+
+  it('keeps rules as files and registers them in instructions[]', async () => {
+    const alpha = await makeBundle('alpha', 'alpha-server', 'Read(**)');
+    const beta = await makeBundle('beta', 'beta-server', 'Bash(git:*)');
+
+    const alphaRecord = await install(alpha, 'opencode');
+    await install(beta, 'opencode');
+
+    const rule = await readText('.opencode/rules/alpha-typescript.md');
+    // OpenCode has no glob-scoped rule format, so the globs are stated in prose.
+    expect(rule).toContain('**Applies to:** `**/*.ts`');
+    expect(rule).toContain('- Prefer named exports.');
+
+    // Both bundles list their own rule; neither replaced the other's entry.
+    expect((await readJson('opencode.json')).instructions).toEqual([
+      '.opencode/rules/alpha-typescript.md',
+      '.opencode/rules/beta-typescript.md',
+    ]);
+
+    await rollback(alphaRecord, projectDir);
+
+    expect(await exists('.opencode/rules/alpha-typescript.md')).toBe(false);
+    expect((await readJson('opencode.json')).instructions).toEqual([
+      '.opencode/rules/beta-typescript.md',
+    ]);
+  });
+});
+
+describe('pi target', () => {
+  it('maps the kinds it has a home for', async () => {
+    const alpha = await makeBundle('alpha', 'alpha-server', 'Read(**)');
+    const record = await install(alpha, 'pi');
+
+    // Rules and context both fold into AGENTS.md; Pi has no per-rule format.
+    const agentsMd = await readText('AGENTS.md');
+    expect(agentsMd).toContain('<!-- hcm:begin alpha/rules/alpha-typescript -->');
+    expect(agentsMd).toContain('**Applies to:** `**/*.ts`');
+    expect(agentsMd).toContain('Instructions from alpha.');
+
+    const settings = await readJson('.pi/settings.json');
+    expect((settings.permissions as { allow: string[] }).allow).toEqual(['Read(**)']);
+
+    await rollback(record, projectDir);
+    expect(await exists('.pi/settings.json')).toBe(false);
+  });
+
+  it('writes MCP servers to the shared .mcp.json convention', async () => {
+    const alpha = await makeBundle('alpha', 'alpha-server', 'Read(**)');
+    const record = await install(alpha, 'pi');
+
+    // Pi has no MCP client of its own, but its MCP extensions read the same
+    // .mcp.json every other harness uses, so the server passes through as-is.
+    expect(await readJson('.mcp.json')).toEqual({
+      mcpServers: { 'alpha-server': { command: 'alpha-server', args: ['--serve'] } },
+    });
+
+    await rollback(record, projectDir);
+    expect(await exists('.mcp.json')).toBe(false);
+  });
+
+  it('shares .mcp.json with Claude Code without either owning it', async () => {
+    const alpha = await makeBundle('alpha', 'alpha-server', 'Read(**)');
+    await install(alpha, 'claude-code');
+    const piRecord = await install(alpha, 'pi');
+
+    // The second install finds an identical entry and adopts it -- recorded as
+    // a dependency, but not ours to delete.
+    const adopted = piRecord.receipts.find(
+      (receipt) => receipt.op === 'json-value' && receipt.path === '.mcp.json',
+    );
+    expect(adopted).toMatchObject({ preexisting: true });
+
+    // So removing Pi leaves Claude Code's server exactly where it was.
+    await rollback(piRecord, projectDir);
+    expect(await readJson('.mcp.json')).toEqual({
+      mcpServers: { 'alpha-server': { command: 'alpha-server', args: ['--serve'] } },
+    });
+  });
+
+  it('installs a subagent as a skill, not an agents file', async () => {
+    const alpha = await makeBundle('alpha', 'alpha-server', 'Read(**)');
+    const record = await install(alpha, 'pi');
+
+    // Pi has no agents directory: subagents share skills/ with skills.
+    expect(await exists('.pi/agents/alpha-reviewer.md')).toBe(false);
+
+    const skill = await readText('.pi/skills/alpha-reviewer/SKILL.md');
+    expect(skill).toContain('name: alpha-reviewer');
+    expect(skill).toContain('description: Reviews code');
+    expect(skill).toContain('Review the code.');
+    // Agent Skills frontmatter is name + description; Pi has no per-skill
+    // tool allowlist for a subagent's `tools` to land in.
+    expect(skill).not.toContain('tools:');
+
+    await rollback(record, projectDir);
+    expect(await exists('.pi/skills/alpha-reviewer/SKILL.md')).toBe(false);
+  });
+
+  it('has a home for every resource kind', async () => {
+    const alpha = await makeBundle('alpha', 'alpha-server', 'Read(**)');
+    const plan = await buildPlan(await loadBundle(alpha), 'pi', 'project', projectDir);
+
+    expect(plan.skipped).toEqual([]);
+  });
+});
+
 describe('conflict detection', () => {
   it('flags a TOML table that already exists', async () => {
     await fs.writeFile(

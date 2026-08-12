@@ -11,6 +11,8 @@ Supported targets:
 | Claude Code | <https://code.claude.com/docs/en/claude-directory> |
 | GitHub Copilot | <https://awesome-copilot.github.com/learning-hub/copilot-configuration-basics/> |
 | Reasonix | <https://github.com/esengine/DeepSeek-Reasonix/blob/main-v2/docs/GUIDE.md> |
+| OpenCode | <https://opencode.ai/docs/config/> |
+| Pi | <https://pi.dev/docs/latest/quickstart> |
 
 ## Install
 
@@ -33,6 +35,7 @@ hcm install my-kit               # install into every supported target
 hcm list --installed             # what is installed here?
 hcm status                       # is it all still intact?
 hcm update my-kit                # re-read the source, reinstall in place
+hcm context append               # put back context an agent overwrote
 hcm uninstall my-kit             # remove exactly what was installed
 ```
 
@@ -54,7 +57,8 @@ my-kit/
 │   └── checklist.md
 ├── commands/review-pr.md           # slash command / prompt
 ├── rules/typescript.md             # path-scoped instructions
-├── context/conventions.md          # always-loaded instructions
+├── context/10-conventions.md       # always-loaded instructions, one section per file
+├── context/20-pull-requests.md     #   concatenated in filename order
 ├── mcp/filesystem.json             # one file per MCP server
 ├── settings/settings.json          # settings fragment, deep-merged
 └── assets/                         # copied verbatim
@@ -68,7 +72,7 @@ version: 1.0.0
 description: What this bundle is for
 tags: [review, typescript]
 # Omit "targets" to support all of them.
-targets: [claude-code, copilot, reasonix]
+targets: [claude-code, copilot, reasonix, opencode, pi]
 ```
 
 ## Where things land
@@ -87,6 +91,16 @@ harness's home directory (`hcm targets` prints the exact paths on your machine).
 | mcp | `.mcp.json` → `mcpServers.<n>` | `.vscode/mcp.json` → `servers.<n>` | `reasonix.toml` → `[[plugins]]` |
 | settings | `.claude/settings.json` | `.github/copilot/settings.json` | `reasonix.toml` |
 
+| Kind | OpenCode | Pi |
+| --- | --- | --- |
+| subagent | `.opencode/agents/<n>.md` | `.pi/skills/<n>/SKILL.md` |
+| skill | `.opencode/skills/<n>/` | `.pi/skills/<n>/` |
+| command | `.opencode/commands/<n>.md` | `.pi/prompts/<n>.md` |
+| rule | `.opencode/rules/<n>.md` + `opencode.json` → `instructions[]` | `AGENTS.md` |
+| context | `AGENTS.md` | `AGENTS.md` |
+| mcp | `opencode.json` → `mcp.<n>` | `.mcp.json` → `mcpServers.<n>` |
+| settings | `opencode.json` | `.pi/settings.json` |
+
 Frontmatter is translated per target. A rule written once as:
 
 ```yaml
@@ -94,20 +108,117 @@ appliesTo: ["**/*.ts", "**/*.tsx"]
 ```
 
 becomes `paths: [...]` for Claude Code, `applyTo: '**/*.ts, **/*.tsx'` for
-Copilot, and — since Reasonix has no glob-scoped rule format — a line of prose
-above the rule text in `REASONIX.md`. Subagent `tools` become a comma-separated
+Copilot, and — since Reasonix, OpenCode and Pi have no glob-scoped rule format —
+a line of prose above the rule text. Subagent `tools` become a comma-separated
 string for Claude Code, a YAML list for Copilot, and `allowed-tools` for
 Reasonix.
 
 Note the deliberate asymmetry: bundles say **subagent**, but each harness keeps
-its own word — and its own filing system — for the same thing. Claude Code and
-Copilot each have an `agents/` directory; Reasonix has none, because there a
-subagent profile *is* a skill, marked `runAs: subagent` and `invocation: manual`
-so it is only invoked by name. `hcm` translates; you only learn one vocabulary.
+its own word — and its own filing system — for the same thing. Claude Code,
+Copilot and OpenCode each have an `agents/` directory; Reasonix and Pi have
+none, because there a subagent *is* a skill — on Reasonix marked `runAs:
+subagent` and `invocation: manual` so it is only invoked by name, on Pi invoked
+as `/skill:<name>`. `hcm` translates; you only learn one vocabulary.
 
-One consequence: on Reasonix a subagent and a skill share one namespace, and
-Reasonix refuses a profile whose name already belongs to another skill. Give
-them distinct names — `hcm validate` flags a bundle that does not.
+One consequence: on Reasonix and Pi a subagent and a skill share one namespace.
+Give them distinct names — `hcm validate` flags a bundle that does not.
+
+### What each target does with the edges
+
+Every target has a home for every kind, but the fit is not always exact:
+
+- **OpenCode gates subagent tools through a `permission` object** keyed by its
+  own categories (`edit`, `bash`, `read`, …) rather than a list of tool names,
+  so a canonical `tools:` allowlist has no faithful translation and is dropped
+  from the written agent file. Set it in OpenCode's own config if you need it.
+- **Pi has neither sub-agents nor a built-in MCP client** — both are extension
+  territory there — but both kinds still install, on the conventions those
+  extensions build on. A subagent becomes a skill (Agent Skills frontmatter is
+  just `name` and `description`, so `tools` and `model` are dropped, and with no
+  delegation the prompt runs in the main context rather than its own). MCP
+  servers go to the same `.mcp.json`, in the same `mcpServers` shape, that
+  Claude Code uses — inert until an MCP extension is installed, correct once it
+  is.
+- **OpenCode has no glob-scoped rule format**, but it does read extra
+  instruction files listed in `instructions`. So a rule becomes a file *and* one
+  entry appended to that array — appended, never replaced, so several bundles
+  can each list their own rules in the same config and each remove only its own
+  on uninstall.
+
+Finally, two files are genuinely shared between harnesses rather than owned by
+one, and they behave differently when a bundle goes into both targets:
+
+- **`.mcp.json`** (Claude Code and Pi). The second install finds the entry
+  already there and identical, so it *adopts* it — recorded as a dependency,
+  but not its to delete. Uninstalling either target leaves the other's server
+  in place and `hcm status` stays green. Nothing to think about.
+- **`AGENTS.md`** (OpenCode and Pi). Marker blocks are always rewritten rather
+  than adopted, so the two installs share one block: uninstalling from *either*
+  takes it away, and the survivor shows up as `missing` under `hcm status`
+  until you reinstall it. Worth knowing if you run both harnesses side by side.
+
+Everything outside those two files is per-target and unaffected.
+
+## Context: sections that survive being overwritten
+
+`CLAUDE.md`, `AGENTS.md` and `REASONIX.md` are the one place hcm writes that the
+harness's own agent also writes. Ask it to record what it has learned about the
+project and it may rewrite the file from scratch — taking the marker blocks, and
+the instructions inside them, with it.
+
+A receipt cannot help here: it records *where* a section was, not what it said.
+So every install also drops a copy of each context section under `.hcm`:
+
+```
+.hcm/
+├── state.json                          # the install ledger
+├── context.json                        # each section, its order, and where it goes
+└── context/
+    └── ts-review-kit/
+        ├── 10-conventions.md
+        └── 20-pull-requests.md
+```
+
+Split `context/` into several short files and each becomes its own section —
+its own marker block, restorable on its own. Filename order is section order,
+which is what the numeric prefixes are for.
+
+```bash
+hcm context                     # what is tracked, and is it still in place?
+hcm context append              # put back whatever has gone missing
+hcm context override            # clear the file, rewrite it from the sections
+hcm context remove              # take the sections out again
+```
+
+Every subcommand takes bundle names or ids — `hcm context append 1 my-kit` — and
+acts on all of them when you name none. `-t` narrows to one harness, `-s` to a
+scope, and `--dry-run` shows the change without making it.
+
+**`append` is the everyday one.** It looks at each tracked section and writes
+back only what is absent, leaving the rest of the file — including anything the
+agent wrote — exactly where it is. Two things it deliberately does not touch:
+
+- A section still inside its markers is left alone even if the text has been
+  edited, on the same principle as everywhere else in `hcm`. `--force` writes
+  every section from the cache instead, which is how you undo such an edit.
+- A section whose text survived the rewrite *without* its markers is reported as
+  `unmarked` and not appended, because appending would say the same thing twice.
+  `hcm context list` shows these; re-wrapping one means deleting the loose copy
+  and running `append` again.
+
+**`override` is the reset.** It discards everything hcm did not write and lays
+the sections down in order. Blocks belonging to other bundles — or to rules,
+which share `AGENTS.md` on Pi and `REASONIX.md` on Reasonix — are kept and moved
+below, since they have receipts of their own. Because it does destroy
+hand-written text, it says how many lines that is and asks first; `--force`
+answers yes, and with no terminal it refuses rather than guessing.
+
+**`remove` takes the sections out** and keeps the cached copies, so `append` can
+put them back. Uninstalling the bundle is what forgets them for good.
+
+Throughout, the install receipts are kept in step: after `hcm context remove`,
+`hcm status` does not report the blocks as damage, and after `append` it counts
+them as present again.
 
 ## How rollback stays exact
 
@@ -223,6 +334,10 @@ hcm install my-kit --on-conflict prompt     # ask even where hcm would not have
 | `hcm list --installed` | Installed bundles. `--scope project\|user\|all`, `--json` |
 | `hcm info <bundle>` | Contents, plus where every item would land in each target |
 | `hcm status` | Verify installed items are still present and unmodified |
+| `hcm context [list]` | Tracked context sections, and whether each is still in its file. `--json` |
+| `hcm context append [bundle...]` | Add back the sections that have gone missing. `-t`, `-s`, `--dry-run`, `--force` |
+| `hcm context override [bundle...]` | Clear the file and rewrite it from the cached sections. `-t`, `-s`, `--dry-run`, `--force` |
+| `hcm context remove [bundle...]` | Take the sections out, keeping the cached copies. `-t`, `-s`, `--dry-run` |
 | `hcm validate [dir]` | Check a bundle for common mistakes |
 | `hcm init [dir]` | Scaffold a new bundle |
 | `hcm targets` | Supported harnesses and their paths on this machine |
@@ -260,7 +375,8 @@ between machines depends on them.
 ### Scopes
 
 - `--scope project` (default) — writes into the current directory; state in
-  `.hcm/state.json`, which you can commit so the team shares it.
+  `.hcm/state.json` and cached context in `.hcm/context/`, both of which you can
+  commit so the team shares them.
 - `--scope user` — writes into the harness's home directory; state in
   `~/.hcm/state.json`.
 
@@ -496,6 +612,7 @@ src/
 ├── commands/           # one file per command
 ├── core/               # bundle loading, planning, executing, rollback, state,
 │                       # registry.ts + store.ts -- ids and the bundle snapshots
+│                       # context.ts -- the cached instruction sections
 ├── merge/              # json-merge.ts, blocks.ts, toml.ts -- the receipt machinery
 └── targets/            # one adapter per harness
 bundles/ts-review-kit/  # sample bundle exercising every resource kind

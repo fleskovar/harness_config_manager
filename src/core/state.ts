@@ -70,6 +70,56 @@ export async function removeInstallation(scope: Scope, cwd: string, id: string):
 }
 
 /**
+ * Edit the ledger in one read-modify-write. `mutate` returns true when it
+ * changed something; nothing is written otherwise, so a no-op leaves the file
+ * (and its timestamp) alone.
+ */
+export async function mutateInstallations(
+  scope: Scope,
+  cwd: string,
+  mutate: (installations: InstallationRecord[]) => boolean,
+): Promise<void> {
+  const state = await readState(scope, cwd);
+  if (!mutate(state.installations)) return;
+  await writeState(scope, cwd, state);
+}
+
+/**
+ * Add or drop the receipt for a marker block, so that taking a section out of
+ * `CLAUDE.md` by hand -- with `hcm context remove` -- does not leave the ledger
+ * claiming an item that is no longer there. Returns true when it changed
+ * something.
+ *
+ * Does nothing when the bundle has no installation record for that target: a
+ * section can be cached and managed without one, and inventing a record here
+ * would give `hcm uninstall` something it never installed.
+ */
+export function setBlockReceipt(
+  installations: InstallationRecord[],
+  id: string,
+  block: { path: string; blockId: string },
+  present: boolean,
+): boolean {
+  const record = installations.find((candidate) => candidate.id === id);
+  if (!record) return false;
+
+  const index = record.receipts.findIndex(
+    (receipt) =>
+      receipt.op === 'block' && receipt.path === block.path && receipt.blockId === block.blockId,
+  );
+
+  if (present) {
+    if (index >= 0) return false;
+    record.receipts.push({ op: 'block', ...block, syntax: 'markdown' });
+    return true;
+  }
+
+  if (index < 0) return false;
+  record.receipts.splice(index, 1);
+  return true;
+}
+
+/**
  * Index of every item currently owned by *other* bundles in this scope+target,
  * used to detect cross-bundle conflicts before writing.
  * Keys are `path::descriptor`, values are the owning bundle name.

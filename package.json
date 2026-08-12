@@ -1,7 +1,7 @@
 {
   "name": "harness-config-manager",
   "version": "0.1.0",
-  "description": "Define agents, skills, commands, rules and MCP servers once; install them into Claude Code, GitHub Copilot and Reasonix with exact, item-level rollback.",
+  "description": "Define agents, skills, commands, rules and MCP servers once; install them into Claude Code, GitHub Copilot, Reasonix, OpenCode and Pi with exact, item-level rollback.",
   "type": "module",
   "bin": {
     "hcm": "./dist/cli.js"
@@ -41,6 +41,8 @@
     "claude-code",
     "github-copilot",
     "reasonix",
+    "opencode",
+    "pi",
     "agents",
     "skills",
     "mcp",

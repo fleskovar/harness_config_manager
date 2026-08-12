@@ -13,7 +13,7 @@
  *   files    -> path + content hash
  */
 
-export type TargetId = 'claude-code' | 'copilot' | 'reasonix';
+export type TargetId = 'claude-code' | 'copilot' | 'reasonix' | 'opencode' | 'pi';
 
 export type Scope = 'project' | 'user';
 
@@ -213,6 +213,47 @@ export interface StateFile {
 
 export function installationId(bundle: string, target: TargetId, scope: Scope): string {
   return `${bundle}@${target}@${scope}`;
+}
+
+// ---------------------------------------------------------------------------
+// The context cache
+// ---------------------------------------------------------------------------
+
+/**
+ * Where one context section has been written. A section installed into two
+ * harnesses has two placements; OpenCode and Pi both write `AGENTS.md`, so two
+ * placements can name the same file.
+ */
+export interface ContextPlacement {
+  target: TargetId;
+  /** Scope-root-relative POSIX path of the instruction file. */
+  path: string;
+  /** The marker block id, the same one the install receipt records. */
+  blockId: string;
+  /** When hcm last wrote this section into that file. */
+  updatedAt: string;
+}
+
+/**
+ * One `context/<name>.md` from a bundle, cached under `.hcm` so it can be put
+ * back after something rewrote the harness's instruction file.
+ */
+export interface ContextSection {
+  bundle: string;
+  name: string;
+  /** Position within its bundle, taken from the order of the bundle's files. */
+  order: number;
+  /** Path of the cached copy, relative to the context cache directory. */
+  file: string;
+  /** sha256 of the cached body. */
+  hash: string;
+  capturedAt: string;
+  placements: ContextPlacement[];
+}
+
+export interface ContextLedger {
+  version: 1;
+  sections: ContextSection[];
 }
 
 // ---------------------------------------------------------------------------

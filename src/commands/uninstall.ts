@@ -1,3 +1,4 @@
+import { forgetContext } from '../core/context.js';
 import { HcmError } from '../core/errors.js';
 import { color, log } from '../core/logger.js';
 import { resolveInstalledName } from '../core/registry.js';
@@ -91,6 +92,9 @@ export async function rollbackInstallation(
   }
 
   await removeInstallation(record.scope, options.cwd, record.id);
+  // The cached context sections went with the blocks; nothing should offer to
+  // put back instructions from a bundle that is no longer installed.
+  await forgetContext(record.bundle, record.target, record.scope, options.cwd);
   return true;
 }
 

@@ -136,6 +136,19 @@ export async function select<T extends string>(
   }
 }
 
+/** Yes or no, defaulting to the safe answer unless told otherwise. */
+export async function confirm(question: string, defaultValue = false): Promise<boolean> {
+  const answer = await select<'yes' | 'no'>(
+    question,
+    [
+      { value: 'no', label: 'no', detail: 'leave the file as it is' },
+      { value: 'yes', label: 'yes', detail: 'go ahead' },
+    ],
+    defaultValue ? 'yes' : 'no',
+  );
+  return answer === 'yes';
+}
+
 /**
  * Free-text answer, re-asked until `validate` accepts it. `validate` returns
  * an error message to reject, or undefined to accept.

@@ -6,6 +6,13 @@ import {
   configSetCommand,
   configUnsetCommand,
 } from './commands/config.js';
+import {
+  contextAppendCommand,
+  contextListCommand,
+  contextOverrideCommand,
+  contextRemoveCommand,
+  type ContextOptions,
+} from './commands/context.js';
 import { exportCommand } from './commands/export.js';
 import { importCommand } from './commands/import.js';
 import { infoCommand } from './commands/info.js';
@@ -37,7 +44,7 @@ program
   .name('hcm')
   .description(
     'Define agents, skills, commands, rules and MCP servers once; install them into ' +
-      'Claude Code, GitHub Copilot and Reasonix with exact, item-level rollback.',
+      'Claude Code, GitHub Copilot, Reasonix, OpenCode and Pi with exact, item-level rollback.',
   )
   .version('0.1.0')
   .option('-q, --quiet', 'suppress non-essential output')
@@ -227,6 +234,64 @@ program
       dryRun: options.dryRun,
       cwd,
     });
+  });
+
+/**
+ * `hcm context` -- the standing-instruction files are the one place a harness's
+ * own agent writes back, so the sections installed there need putting back
+ * from time to time. Every subcommand takes the same bundle list and options.
+ */
+const context = program
+  .command('context')
+  .description('manage the context sections installed in CLAUDE.md / AGENTS.md and friends');
+
+const contextScopeOption = () =>
+  new Option('-s, --scope <scope>', 'scope to act on')
+    .choices(['project', 'user', 'all'])
+    .default('project');
+
+const contextOptions = (options: Record<string, unknown>): ContextOptions => ({
+  targets: options.target as string[] | undefined,
+  scope: options.scope as Scope | 'all',
+  dryRun: options.dryRun as boolean | undefined,
+  force: options.force as boolean | undefined,
+  json: options.json as boolean | undefined,
+  cwd,
+});
+
+const contextSubcommand = (name: string, description: string, isDefault = false) =>
+  context
+    .command(name, { isDefault })
+    .argument('[bundle...]', 'bundle name(s) or id(s); defaults to all of them')
+    .description(description)
+    .addOption(targetOption())
+    .addOption(contextScopeOption());
+
+// `hcm context` on its own is a status report, as `hcm config` is.
+contextSubcommand('list', 'show each tracked section and whether it is still in place', true)
+  .option('--json', 'machine-readable output')
+  .action(async (bundles, options) => {
+    await contextListCommand(bundles, contextOptions(options));
+  });
+
+contextSubcommand('append', 'add back the sections that are no longer in the file')
+  .option('--dry-run', 'show what would change without writing')
+  .option('--force', 'write every section from the cache, without checking first')
+  .action(async (bundles, options) => {
+    await contextAppendCommand(bundles, contextOptions(options));
+  });
+
+contextSubcommand('override', 'clear the file and rewrite it from the cached sections')
+  .option('--dry-run', 'show what would change without writing')
+  .option('--force', 'discard content hcm did not write without asking')
+  .action(async (bundles, options) => {
+    await contextOverrideCommand(bundles, contextOptions(options));
+  });
+
+contextSubcommand('remove', 'take the sections out, keeping the cached copies')
+  .option('--dry-run', 'show what would change without writing')
+  .action(async (bundles, options) => {
+    await contextRemoveCommand(bundles, contextOptions(options));
   });
 
 const config = program.command('config').description('view and change hcm settings');

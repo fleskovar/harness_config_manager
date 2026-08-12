@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { hasBlock, listBlockIds, removeBlock, upsertBlock } from '../src/merge/blocks.js';
+import {
+  extractBlocks,
+  hasBlock,
+  keepOnlyBlocks,
+  listBlockIds,
+  removeBlock,
+  upsertBlock,
+} from '../src/merge/blocks.js';
 
 describe('markdown blocks', () => {
   it('appends a block without disturbing existing content', () => {
@@ -79,5 +86,54 @@ describe('listBlockIds', () => {
 
     expect(listBlockIds(content, 'markdown')).toEqual(['alpha/context', 'beta/context']);
     expect(hasBlock(content, 'markdown', 'beta/context')).toBe(true);
+  });
+});
+
+describe('extractBlocks', () => {
+  it('returns each block whole, in order', () => {
+    let content = upsertBlock('# Notes\n', 'markdown', 'alpha/context', 'Alpha.');
+    content = upsertBlock(content, 'markdown', 'beta/context', 'Beta.');
+
+    const blocks = extractBlocks(content, 'markdown');
+    expect(blocks.map((block) => block.id)).toEqual(['alpha/context', 'beta/context']);
+    expect(blocks[0]?.text).toBe(
+      '<!-- hcm:begin alpha/context -->\nAlpha.\n<!-- hcm:end alpha/context -->',
+    );
+  });
+
+  it('ignores a begin marker whose end has been deleted', () => {
+    // The text after it is no longer ours to move or throw away.
+    const content = '<!-- hcm:begin alpha/context -->\nAlpha.\n\nSomething else.\n';
+    expect(extractBlocks(content, 'markdown')).toEqual([]);
+  });
+
+  it('finds toml blocks too', () => {
+    const content = upsertBlock('model = "x"\n', 'toml', 'alpha/plugins/gh', '[[plugins]]');
+    expect(extractBlocks(content, 'toml').map((block) => block.id)).toEqual(['alpha/plugins/gh']);
+  });
+});
+
+describe('keepOnlyBlocks', () => {
+  it('drops everything hcm did not write, and counts it', () => {
+    let content = '# Written by an agent\n\nStale detail.\n';
+    content = upsertBlock(content, 'markdown', 'alpha/context', 'Alpha.');
+    content = upsertBlock(content, 'markdown', 'beta/context', 'Beta.');
+
+    const result = keepOnlyBlocks(content, 'markdown');
+
+    expect(result.content).not.toContain('Stale detail.');
+    expect(result.content).toContain('Alpha.');
+    expect(result.content).toContain('Beta.');
+    expect(result.blocks).toHaveLength(2);
+    // "# Written by an agent" and "Stale detail." -- blank lines do not count.
+    expect(result.discardedLines).toBe(2);
+  });
+
+  it('leaves a file that is nothing but blocks unchanged', () => {
+    const content = upsertBlock('', 'markdown', 'alpha/context', 'Alpha.');
+    const result = keepOnlyBlocks(content, 'markdown');
+
+    expect(result.content).toBe(content);
+    expect(result.discardedLines).toBe(0);
   });
 });

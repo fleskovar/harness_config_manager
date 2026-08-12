@@ -1,7 +1,9 @@
 import fsSync from 'node:fs';
 import { renderMarkdown } from '../core/frontmatter.js';
 import type { BundleResource, PlanAction } from '../core/types.js';
+import { blockId } from '../merge/blocks.js';
 import { flattenLeaves } from '../merge/json-merge.js';
+import type { TargetContext } from './types.js';
 import { compact, toList } from './types.js';
 
 /** Claude Code and Copilot both want a comma-separated tools string. */
@@ -63,6 +65,41 @@ export function skillFiles(resource: BundleResource, targetDir: string): PlanAct
       payload: { kind: 'file' as const, contents: readBytes(file.absolutePath) },
     };
   });
+}
+
+/**
+ * One bundle's contribution to a harness's standing-instruction file --
+ * `CLAUDE.md`, `AGENTS.md`, `REASONIX.md`. Written as a marker block so
+ * uninstall removes exactly this section and leaves the rest of the file,
+ * including anything hand-written, alone.
+ */
+export function instructionBlock(
+  file: string,
+  ctx: TargetContext,
+  id: string,
+  name: string,
+  body: string,
+): PlanAction {
+  return {
+    path: file,
+    describe: `${file} ← ${name}`,
+    payload: {
+      kind: 'block',
+      blockId: blockId(ctx.bundle, id),
+      syntax: 'markdown',
+      body,
+    },
+  };
+}
+
+/**
+ * For harnesses with no glob-scoped rule format, the globs cannot be enforced
+ * by the loader -- so state them in prose above the rule for the model to
+ * honour. Empty when the rule applies everywhere.
+ */
+export function appliesToPrefix(resource: BundleResource): string {
+  const paths = toList(resource.frontmatter.appliesTo ?? resource.frontmatter.paths);
+  return paths.length ? `**Applies to:** ${paths.map((p) => `\`${p}\``).join(', ')}\n\n` : '';
 }
 
 export function assetFile(resource: BundleResource, targetPath: string): PlanAction {

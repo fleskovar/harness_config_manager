@@ -277,14 +277,15 @@ export function validateBundle(bundle: LoadedBundle): string[] {
     seen.set(key, resource.bundlePath);
   }
 
-  // On Reasonix a subagent is a Skill, so the two kinds share one namespace --
-  // Reasonix itself refuses a profile whose name belongs to another Skill.
+  // On Reasonix and Pi a subagent is a Skill, so the two kinds share one
+  // namespace -- Reasonix itself refuses a profile whose name belongs to
+  // another Skill, and on Pi the two would overwrite each other's SKILL.md.
   for (const resource of bundle.resources) {
     if (resource.kind !== 'subagent') continue;
     const skill = seen.get(`skill:${resource.name}`);
     if (skill) {
       problems.push(
-        `Subagent "${resource.name}" collides with the skill of the same name (${skill}, ${resource.bundlePath}): Reasonix stores both as skills/${resource.name}/`,
+        `Subagent "${resource.name}" collides with the skill of the same name (${skill}, ${resource.bundlePath}): Reasonix and Pi store both as skills/${resource.name}/`,
       );
     }
   }

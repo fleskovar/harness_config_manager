@@ -4,6 +4,7 @@ import {
   type Resolution,
   resolvePlanConflicts,
 } from '../core/conflicts.js';
+import { captureContext } from '../core/context.js';
 import { ConflictError, HcmError } from '../core/errors.js';
 import { applyPlan } from '../core/executor.js';
 import { describeSource } from '../core/github.js';
@@ -150,6 +151,11 @@ export async function installInto(
     receipts,
   });
 
+  // Keep a copy of the context sections. The harness's own agent rewrites
+  // CLAUDE.md and AGENTS.md; a receipt records where a section was, not what it
+  // said, so without this there would be nothing to put back. See core/context.ts.
+  const cached = await captureContext(bundle, targetId, options.scope, options.cwd, plan.actions);
+
   const adopted = receipts.filter(
     (receipt) => (receipt.op === 'file' || receipt.op === 'json-value') && receipt.preexisting,
   ).length;
@@ -158,6 +164,9 @@ export async function installInto(
     `  installed ${receipts.length} item(s)` +
       (adopted > 0 ? color.dim(` (${adopted} already present, left as they are)`) : ''),
   );
+  if (cached > 0) {
+    log.debug(`cached ${cached} context section(s) for "hcm context append"`);
+  }
 }
 
 /**

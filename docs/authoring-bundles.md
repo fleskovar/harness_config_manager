@@ -32,6 +32,8 @@ author: ...
 homepage: ...
 tags: [review, typescript]
 targets: [claude-code, copilot]   # optional; omit to support all
+                                  # known ids: claude-code, copilot, reasonix,
+                                  #            opencode, pi
 ```
 
 Set `targets` only when a bundle genuinely does not make sense elsewhere.
@@ -67,6 +69,20 @@ bundle, and `hcm validate` will tell you if you have. Two further Reasonix-only
 frontmatter keys are passed through when present: `effort` and `readOnly`
 (rendered as `read-only`, which strips writer tools).
 
+OpenCode files subagents at `.opencode/agents/<name>.md` with `mode: subagent`,
+and passes `model`, `temperature` and `color` through. It does *not* take a tool
+allowlist: access there is a `permission` object keyed by OpenCode's own
+categories (`edit`, `bash`, `read`, …), which a list of tool names cannot be
+translated into, so `tools` is dropped for that target.
+
+Pi has no agents directory either, and no delegation at all — that is extension
+territory there. A subagent installs as a skill, `.pi/skills/<name>/SKILL.md`,
+invoked as `/skill:<name>`. Pi follows the Agent Skills standard, whose
+frontmatter is just `name` and `description`, so `tools` and `model` have
+nowhere to go and are dropped; and without delegation the prompt runs in the
+main context rather than its own. As on Reasonix, subagents and skills share one
+namespace — `hcm validate` flags a name used by both.
+
 ### Skills — `skills/<name>/SKILL.md` plus supporting files
 
 ```
@@ -91,8 +107,10 @@ allowedTools: [Read, Grep, Bash]
 Review this branch against `$ARGUMENTS`...
 ```
 
-Becomes a slash command in Claude Code and Reasonix, and a `.prompt.md` file for
-Copilot.
+Becomes a slash command in Claude Code, Reasonix and OpenCode, a `.prompt.md`
+file for Copilot, and a prompt template in `.pi/prompts/` for Pi. `argumentHint`
+survives everywhere that has a field for it; OpenCode has none, so it is dropped
+there.
 
 ### Rules — `rules/<name>.md`
 
@@ -111,9 +129,10 @@ appliesTo:
 `applyTo: '**/*.ts, **/*.tsx'` for Copilot. Omit it and the rule loads at session
 start everywhere (Copilot gets `applyTo: '**'`).
 
-Reasonix is the exception: its standing instructions are the `REASONIX.md`
-hierarchy, scoped by directory rather than by glob, so a rule is appended to
-`REASONIX.md` as a marker block with its globs stated in prose:
+Reasonix and Pi are the exceptions: their standing instructions are the
+`REASONIX.md` / `AGENTS.md` hierarchy, scoped by directory rather than by glob,
+so a rule is appended to that file as a marker block with its globs stated in
+prose:
 
 ```markdown
 <!-- hcm:begin my-kit/rules/typescript -->
@@ -123,25 +142,62 @@ hierarchy, scoped by directory rather than by glob, so a rule is appended to
 <!-- hcm:end my-kit/rules/typescript -->
 ```
 
-That means a Reasonix rule costs context in every session, the way `context/`
-does. Keep rules short, or prefer `context/` when the instruction is universal
-anyway.
+That means a Reasonix or Pi rule costs context in every session, the way
+`context/` does. Keep rules short, or prefer `context/` when the instruction is
+universal anyway.
+
+OpenCode sits between the two. It has no glob-scoped rule format either, but it
+does load extra instruction files named in `instructions`, so the rule keeps its
+own file — `.opencode/rules/<name>.md`, with the same prose header — and one
+entry is *appended* to that array in `opencode.json`. Appending rather than
+replacing is what lets several bundles list rules in the same config and each
+take back only its own on uninstall. The file is still loaded in full every
+session, so the same brevity advice applies.
 
 ### Context — `context/<name>.md`
 
 Always-loaded instructions. These are merged into the harness's top-level
-instruction file (`CLAUDE.md`, `.github/copilot-instructions.md`, `REASONIX.md`)
-inside a marker block:
+instruction file (`CLAUDE.md`, `.github/copilot-instructions.md`, `REASONIX.md`,
+or `AGENTS.md` for OpenCode and Pi) inside a marker block:
 
 ```markdown
-<!-- hcm:begin my-kit/conventions -->
+<!-- hcm:begin my-kit/10-conventions -->
 ## Review conventions
 ...
-<!-- hcm:end my-kit/conventions -->
+<!-- hcm:end my-kit/10-conventions -->
 ```
 
 Start the body at heading level 2 — it is being pasted into someone else's
 document. Keep it short; this text costs context in every single session.
+
+**One section per file.** Every file in `context/` becomes its own block, and
+the blocks are concatenated in filename order — so number them when the order
+matters:
+
+```
+context/
+├── 10-conventions.md
+├── 20-pull-requests.md
+└── 30-glossary.md
+```
+
+Splitting is not cosmetic. This is the one file the harness's own agent writes
+back to, and when it rewrites `CLAUDE.md` your instructions can go with it.
+`hcm` keeps a copy of each section under the project's `.hcm/context/` and
+restores them a section at a time:
+
+```bash
+hcm context            # is everything still in place?
+hcm context append     # put back what is missing, leaving the rest alone
+```
+
+Small sections survive that far better than one long one: a rewrite that keeps
+half your text leaves `append` able to tell what is missing from what is not.
+See [Context in the README](../README.md#context-sections-that-survive-being-overwritten)
+for `override` and `remove`.
+
+The block id is `<bundle>/<section>`, so renaming a context file after people
+have installed the bundle orphans the old block until they run `hcm update`.
 
 ### MCP servers — `mcp/<name>.json`
 
@@ -171,14 +227,36 @@ not state a `type`, so this is enough:
 
 Each target gets the form it expects:
 
-| Canonical | Claude Code `.mcp.json` | Copilot `.vscode/mcp.json` | Reasonix `reasonix.toml` |
-| --- | --- | --- | --- |
-| `command`, `args`, `env` | as written | as written | as written |
-| `url`, `headers` | as written | as written | as written |
-| *(transport)* | inferred by the harness | `type` added (`stdio`/`http`) | `type` added unless stdio, which is the documented default |
-| `startupTimeoutSeconds` | as written | as written | `startup_timeout_seconds` |
-| `callTimeoutSeconds` | as written | as written | `call_timeout_seconds` |
-| `toolTimeoutSeconds` | as written | as written | `tool_timeout_seconds` |
+| Canonical | Claude Code `.mcp.json` | Copilot `.vscode/mcp.json` | Reasonix `reasonix.toml` | OpenCode `opencode.json` |
+| --- | --- | --- | --- | --- |
+| `command`, `args` | as written | as written | as written | merged into one `command` argv array |
+| `env` | as written | as written | as written | `environment` |
+| `url`, `headers` | as written | as written | as written | as written |
+| *(transport)* | inferred by the harness | `type` added (`stdio`/`http`) | `type` added unless stdio, which is the documented default | `type` added (`local`/`remote`) |
+| `startupTimeoutSeconds` | as written | as written | `startup_timeout_seconds` | — |
+| `callTimeoutSeconds` | as written | as written | `call_timeout_seconds` | — |
+| `toolTimeoutSeconds` | as written | as written | `tool_timeout_seconds` | — |
+
+OpenCode names its transports `local` and `remote` rather than `stdio` and
+`http`, and takes the command as a single argv array, so
+`{"command": "npx", "args": ["-y", "server"]}` is written out as
+`{"type": "local", "command": ["npx", "-y", "server"]}`. Its own `cwd`,
+`enabled` and `timeout` keys pass through when you set them.
+
+Pi has no built-in MCP client of its own — servers there come from extensions —
+but those extensions read the same `.mcp.json`, in the same `mcpServers` shape,
+that Claude Code uses. So the definition is written there unchanged and sits
+inert until you install one. At user scope it lands in Pi's own config
+directory, `~/.pi/agent/.mcp.json`, alongside its other resources.
+
+`hcm targets` prints the kinds each harness accepts; today that is all eight
+everywhere, so a bundle installs in full wherever you send it.
+
+That does mean Claude Code and Pi share `.mcp.json` at project scope, which needs
+no special handling: whichever target you install second finds the server
+already there and identical, adopts it rather than claiming it, and leaves it
+alone on uninstall. Installing a bundle into both targets and removing it from
+one keeps the other working.
 
 `${VAR}` references are passed through untouched — every one of these harnesses
 expands them itself, so keep secrets in the environment rather than the bundle.
@@ -296,7 +374,12 @@ will get when you ship a change, use `hcm update my-kit --dry-run` — that show
 the removals as well as the writes, which is where a renamed or deleted resource
 shows up.
 
-Worth testing deliberately: install into a directory that already has a
+Worth testing deliberately: overwrite `CLAUDE.md` with something else entirely,
+then run `hcm context list` and `hcm context append`. That is the state a user's
+project reaches on its own, and it will tell you whether your sections are
+divided the way you think they are.
+
+Also worth testing: install into a directory that already has a
 `.mcp.json` containing one of your servers. If the definitions match, the
 install reports the server as adopted and leaves the file untouched; if they
 differ, you are asked what to do. Seeing both tells you how your bundle lands in
