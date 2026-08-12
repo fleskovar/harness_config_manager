@@ -22,7 +22,9 @@ import YAML from 'yaml';
 import { HcmError } from './errors.js';
 import { parseMarkdown } from './frontmatter.js';
 import { fs, isDirectory, listFiles, pathExists, toPosix } from './fsx.js';
+import { isValidRange } from './semver.js';
 import {
+  type BundleDependency,
   type BundleManifest,
   type BundleResource,
   type BundleSource,
@@ -60,14 +62,103 @@ export async function loadManifest(root: string): Promise<BundleManifest> {
   const manifest = parsed as BundleManifest;
   if (!manifest.name) throw new HcmError(`Manifest ${manifestPath} is missing "name"`);
   if (!manifest.version) throw new HcmError(`Manifest ${manifestPath} is missing "version"`);
-  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(manifest.name)) {
+  if (!BUNDLE_NAME_PATTERN.test(manifest.name)) {
     throw new HcmError(
       `Bundle name "${manifest.name}" is not usable as a directory/file name`,
       'Use letters, digits, dots, dashes and underscores.',
     );
   }
 
+  // Parsed here so a malformed dependency is reported against the manifest it
+  // is written in, rather than at install time against whoever required it.
+  normalizeDependencies(manifest, manifestPath);
+
   return manifest;
+}
+
+const BUNDLE_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]*$/i;
+
+/**
+ * Accept both ways of writing a dependency and return the one shape the rest of
+ * hcm works with:
+ *
+ *   dependencies:
+ *     - jira-board                    # any version
+ *     - team-conventions@^2.0.0       # a range, npm-style
+ *     - name: db-kit
+ *       version: ">=1.2 <2"
+ *       source: acme/agent-kits/db-kit
+ */
+export function normalizeDependencies(
+  manifest: BundleManifest,
+  where = manifest.name,
+): BundleDependency[] {
+  const declared = manifest.dependencies;
+  if (declared === undefined) return [];
+
+  if (!Array.isArray(declared)) {
+    throw new HcmError(
+      `"dependencies" in ${where} must be a list`,
+      'Write one entry per bundle: "- jira-board@^1.2.0", or a mapping with name/version/source.',
+    );
+  }
+
+  const seen = new Set<string>();
+  const dependencies: BundleDependency[] = [];
+
+  for (const entry of declared) {
+    const dependency = typeof entry === 'string' ? parseDependencyString(entry, where) : entry;
+
+    if (!dependency || typeof dependency !== 'object' || typeof dependency.name !== 'string') {
+      throw new HcmError(
+        `Malformed dependency in ${where}: ${JSON.stringify(entry)}`,
+        'Each entry is a name, "name@range", or a mapping with a "name".',
+      );
+    }
+
+    const name = dependency.name.trim();
+    if (!BUNDLE_NAME_PATTERN.test(name)) {
+      throw new HcmError(`"${name}" is not a usable bundle name (in ${where}'s dependencies)`);
+    }
+    if (name === manifest.name) {
+      throw new HcmError(`Bundle "${manifest.name}" depends on itself`);
+    }
+    if (seen.has(name)) {
+      throw new HcmError(
+        `"${name}" is listed twice in ${where}'s dependencies`,
+        'Give one entry per bundle; a single range can say "&&" with a space and "||" for either.',
+      );
+    }
+    seen.add(name);
+
+    const range = typeof dependency.version === 'string' ? dependency.version.trim() : undefined;
+    if (range !== undefined && !isValidRange(range)) {
+      throw new HcmError(
+        `"${range}" is not a version range hcm understands (${where} -> ${name})`,
+        'Supported: *, 1.2.3, ^1.2.3, ~1.2.3, >=1.2.3, 1.2.x, and these combined with spaces or "||".',
+      );
+    }
+
+    const source = typeof dependency.source === 'string' ? dependency.source.trim() : undefined;
+
+    dependencies.push({
+      name,
+      ...(range ? { version: range } : {}),
+      ...(source ? { source } : {}),
+    });
+  }
+
+  return dependencies;
+}
+
+/** `name`, or `name@range` -- the range may itself contain an `@`-free string. */
+function parseDependencyString(entry: string, where: string): BundleDependency {
+  const trimmed = entry.trim();
+  if (!trimmed) throw new HcmError(`Empty dependency entry in ${where}`);
+
+  const at = trimmed.lastIndexOf('@');
+  if (at <= 0) return { name: trimmed };
+  return { name: trimmed.slice(0, at), version: trimmed.slice(at + 1) };
 }
 
 /**
@@ -134,6 +225,7 @@ export async function loadBundle(root: string, source?: BundleSource): Promise<L
     root: absoluteRoot,
     resources: resources.sort((a, b) => a.bundlePath.localeCompare(b.bundlePath)),
     source: source ?? { type: 'local', path: absoluteRoot },
+    dependencies: normalizeDependencies(manifest),
   };
 }
 

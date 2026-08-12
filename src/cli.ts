@@ -34,7 +34,7 @@ import type { ConflictPolicy } from './core/conflicts.js';
 import { ConflictError, HcmError } from './core/errors.js';
 import { color, configureLogger, log } from './core/logger.js';
 import { closePrompt } from './core/prompt.js';
-import type { Scope } from './core/types.js';
+import type { Scope, TargetOptions } from './core/types.js';
 import { TARGET_IDS } from './targets/index.js';
 
 const program = new Command();
@@ -70,6 +70,20 @@ const conflictOption = () =>
     'what to do when an item is already there: ask, keep the existing one, replace it, or stop',
   ).choices(['prompt', 'skip', 'overwrite', 'abort']);
 
+/**
+ * Extensions the machine has, which change where a target files things. Stated
+ * once per install and remembered with it, so `hcm update` does not need it
+ * again -- see `TargetOptions`.
+ */
+const piSubagentsOption = () =>
+  new Option(
+    '--pi-subagents',
+    'Pi has the pi-subagents extension: file subagents in .pi/agents/ rather than as skills',
+  );
+
+const targetOptionsFrom = (options: { piSubagents?: boolean }): TargetOptions =>
+  options.piSubagents ? { piSubagents: true } : {};
+
 program
   .command('install')
   .argument('<bundle>', 'registered name, local path, GitHub URL, or owner/repo[/subdir][#ref]')
@@ -80,6 +94,8 @@ program
   .option('--dry-run', 'show what would change without writing')
   .option('--force', 'overwrite conflicting items (same as --on-conflict overwrite)')
   .option('--refresh', 're-download a GitHub bundle instead of using the cache')
+  .option('--no-deps', 'install only this bundle, not the ones it requires')
+  .addOption(piSubagentsOption())
   .action(async (bundle, options) => {
     await installCommand(bundle, {
       targets: options.target,
@@ -88,6 +104,9 @@ program
       force: options.force,
       onConflict: options.onConflict as ConflictPolicy | undefined,
       refresh: options.refresh,
+      // commander gives --no-deps as deps: false
+      noDeps: options.deps === false,
+      targetOptions: targetOptionsFrom(options),
       cwd,
     });
   });
@@ -101,12 +120,18 @@ program
   .addOption(scopeOption())
   .option('--dry-run', 'show what would be removed without writing')
   .option('--force', 'remove items even if they were edited since install')
+  .option('--cascade', 'also remove the bundles that depend on this one')
+  .option('--ignore-dependents', 'remove it even though other bundles still require it')
+  .option('--keep-orphans', 'keep bundles that were installed only as dependencies')
   .action(async (bundle, options) => {
     await uninstallCommand(bundle, {
       targets: options.target,
       scope: options.scope as Scope,
       dryRun: options.dryRun,
       force: options.force,
+      cascade: options.cascade,
+      ignoreDependents: options.ignoreDependents,
+      keepOrphans: options.keepOrphans,
       cwd,
     });
   });
@@ -122,6 +147,9 @@ program
   .addOption(conflictOption())
   .option('--dry-run', 'show what would change without writing')
   .option('--force', 'replace items that were edited since install')
+  // Omitted, each installation keeps what it recorded; passing it switches
+  // every installation this run touches over.
+  .addOption(piSubagentsOption())
   .action(async (bundle, options) => {
     await updateCommand(bundle, {
       targets: options.target,
@@ -129,6 +157,7 @@ program
       dryRun: options.dryRun,
       force: options.force,
       onConflict: options.onConflict as ConflictPolicy | undefined,
+      ...(options.piSubagents ? { targetOptions: { piSubagents: true } } : {}),
       cwd,
     });
   });
@@ -159,8 +188,13 @@ program
   .argument('<bundle>', 'registered name, local path, GitHub URL, or owner/repo')
   .description('show a bundle’s contents and where each item would land')
   .addOption(scopeOption())
+  .addOption(piSubagentsOption())
   .action(async (bundle, options) => {
-    await infoCommand(bundle, { scope: options.scope as Scope, cwd });
+    await infoCommand(bundle, {
+      scope: options.scope as Scope,
+      targetOptions: targetOptionsFrom(options),
+      cwd,
+    });
   });
 
 program
@@ -224,6 +258,8 @@ program
   .addOption(conflictOption())
   .option('--dry-run', 'with --install, show what would change without writing')
   .option('--force', 'with --install, overwrite conflicting items')
+  .option('--no-deps', 'with --install, do not pull in the bundles each one requires')
+  .addOption(piSubagentsOption())
   .action(async (file, options) => {
     await importCommand(file, {
       install: options.install,
@@ -232,6 +268,8 @@ program
       force: options.force,
       onConflict: options.onConflict as ConflictPolicy | undefined,
       dryRun: options.dryRun,
+      noDeps: options.deps === false,
+      targetOptions: targetOptionsFrom(options),
       cwd,
     });
   });

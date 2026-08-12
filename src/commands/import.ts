@@ -9,7 +9,7 @@ import { HcmError } from '../core/errors.js';
 import { readTextIfExists } from '../core/fsx.js';
 import { color, log } from '../core/logger.js';
 import { addToRegistry } from '../core/registry.js';
-import type { Scope } from '../core/types.js';
+import type { Scope, TargetOptions } from '../core/types.js';
 import { DEFAULT_BUNDLES_FILE } from './export.js';
 import { installCommand } from './install.js';
 
@@ -20,6 +20,10 @@ export interface ImportOptions {
   force?: boolean;
   onConflict?: ConflictPolicy;
   dryRun?: boolean;
+  /** With --install, leave each bundle's own dependencies alone. */
+  noDeps?: boolean;
+  /** With --install, what this machine has; see `TargetOptions`. */
+  targetOptions?: TargetOptions;
   cwd: string;
 }
 
@@ -77,6 +81,8 @@ export async function importCommand(file: string | undefined, options: ImportOpt
         ...(options.force ? { force: true } : {}),
         ...(options.onConflict ? { onConflict: options.onConflict } : {}),
         ...(options.dryRun ? { dryRun: true } : {}),
+        ...(options.noDeps ? { noDeps: true } : {}),
+        ...(options.targetOptions ? { targetOptions: options.targetOptions } : {}),
       });
     }
   }

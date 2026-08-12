@@ -12,7 +12,7 @@ import { getTarget } from '../targets/index.js';
 import { hasBlock } from '../merge/blocks.js';
 import { getAtPointer } from '../merge/json-merge.js';
 import { collidingTables, existingArrayEntryNames, tryParseToml } from '../merge/toml.js';
-import { ownedReceipts, ownershipIndex } from './state.js';
+import { type Claim, claimingBundles, claimPath, collectClaims, ownedReceipts } from './state.js';
 import { readJsonIfExists } from './fsx.js';
 import type { Target } from '../targets/types.js';
 import { isPreexisting } from './types.js';
@@ -25,6 +25,7 @@ import type {
   Receipt,
   Scope,
   TargetId,
+  TargetOptions,
 } from './types.js';
 
 export async function buildPlan(
@@ -32,6 +33,7 @@ export async function buildPlan(
   targetId: TargetId,
   scope: Scope,
   cwd: string,
+  targetOptions: TargetOptions = {},
 ): Promise<InstallPlan> {
   const target = getTarget(targetId);
   const scopeRoot = target.scopeRoot(scope, cwd);
@@ -44,6 +46,7 @@ export async function buildPlan(
       bundle,
       target: targetId,
       scope,
+      targetOptions,
       scopeRoot,
       actions: [],
       conflicts: [],
@@ -59,12 +62,12 @@ export async function buildPlan(
       skipped.push({ resource, reason: `${target.title} has no mapping for ${resource.kind}` });
       continue;
     }
-    actions.push(...resourceActions(target, resource, bundle.manifest.name, scope));
+    actions.push(...resourceActions(target, resource, bundle.manifest.name, scope, targetOptions));
   }
 
-  const conflicts = await detectConflicts(actions, scopeRoot, bundle.manifest.name, targetId, scope, cwd);
+  const conflicts = await detectConflicts(actions, scopeRoot, bundle.manifest.name, cwd);
 
-  return { bundle, target: targetId, scope, scopeRoot, actions, conflicts, skipped };
+  return { bundle, target: targetId, scope, targetOptions, scopeRoot, actions, conflicts, skipped };
 }
 
 /**
@@ -77,20 +80,28 @@ export function resourceActions(
   resource: BundleResource,
   bundleName: string,
   scope: Scope,
+  options: TargetOptions = {},
 ): PlanAction[] {
   return target
-    .actions(resource, { bundle: bundleName, scope })
+    .actions(resource, { bundle: bundleName, scope, options })
     .map((action) => ({ ...action, resource }));
 }
 
 /**
  * A conflict is anything where writing would silently destroy something we do
- * not own: a foreign file at the same path, a JSON key another bundle claims,
- * or a TOML table that already exists (which would produce invalid TOML).
+ * not own: a foreign file at the same path, a JSON key another bundle claims
+ * *with different content*, or a TOML table that already exists (which would
+ * produce invalid TOML).
  *
- * An item that is already exactly what we would write is not a conflict but an
- * *adoption*: the action is marked `adopt` so the executor records it without
- * writing and without claiming the right to delete it later.
+ * Two outcomes are not conflicts:
+ *
+ *   adopt  the item is already exactly what we would write and nobody claims
+ *          it -- it was here before hcm. Recorded, not written, not ours to
+ *          remove.
+ *   share  the item is exactly what we would write and another installation
+ *          claims it. Nothing needs writing, and we claim it too: two bundles
+ *          shipping the same asset store one copy, and it survives until the
+ *          last of them is uninstalled.
  *
  * Exported because resolving a conflict (skip, overwrite, rename) changes the
  * action list, and the result has to be re-checked against disk.
@@ -99,13 +110,11 @@ export async function detectConflicts(
   actions: PlanAction[],
   scopeRoot: string,
   bundleName: string,
-  targetId: TargetId,
-  scope: Scope,
   cwd: string,
 ): Promise<PlanConflict[]> {
   const conflicts: PlanConflict[] = [];
-  const owners = await ownershipIndex(scope, cwd, targetId, bundleName);
-  const mine = await ownedReceipts(scope, cwd, targetId, bundleName);
+  const claims = await collectClaims(cwd, { excludeBundle: bundleName });
+  const mine = await ownedReceipts(cwd, bundleName);
   const jsonCache = new Map<string, unknown>();
   const textCache = new Map<string, string | undefined>();
   const byteCache = new Map<string, Buffer | undefined>();
@@ -134,15 +143,22 @@ export async function detectConflicts(
   for (const action of actions) {
     const { path: relativePath, payload, resource } = action;
     delete action.adopt;
+    delete action.share;
+    delete action.shareItems;
+
+    const at = claimPath(scopeRoot, relativePath);
 
     if (payload.kind === 'file') {
-      const key = `${relativePath}::file`;
-      const owner = owners.get(key);
-      if (owner) {
+      const key = `${at}::file`;
+      const wanted = sha256(payload.contents);
+      const held = claims.get(key) ?? [];
+      const shareable = held.length > 0 && held.every((claim) => claim.hash === wanted);
+
+      if (held.length > 0 && !shareable) {
         conflicts.push({
           path: relativePath,
-          detail: `file is owned by bundle "${owner}"`,
-          owner,
+          detail: `file is owned by ${owners(held)}`,
+          owner: claimingBundles(held)[0] as string,
           resource,
         });
         continue;
@@ -154,12 +170,29 @@ export async function detectConflicts(
         typeof payload.contents === 'string'
           ? await readTextCached(relativePath)
           : await readBytesCached(relativePath);
+
+      // Somebody claims it but it is not there any more: write it back, and
+      // claim it alongside them rather than reporting a collision.
       if (existing === undefined) continue;
 
       const identical =
         typeof existing === 'string'
           ? existing === payload.contents
           : existing.equals(payload.contents as Buffer);
+
+      if (shareable) {
+        // Identical and already claimed: one copy on disk, two claims on it.
+        if (identical) action.share = true;
+        else if (!weWroteIt(mine, key) && !unchangedSinceWeWroteIt(mine, key, existing)) {
+          conflicts.push({
+            path: relativePath,
+            detail: 'file was edited since another bundle installed it',
+            owner: claimingBundles(held)[0] as string,
+            resource,
+          });
+        }
+        continue;
+      }
 
       if (!weWroteIt(mine, key)) {
         // Not ours: identical means adopt, anything else needs a decision.
@@ -183,24 +216,44 @@ export async function detectConflicts(
 
     if (payload.kind === 'json-value') {
       const label = payload.pointer.join('.');
-      const key = `${relativePath}::json:${label}`;
-      const owner = owners.get(key);
-      if (owner) {
+      const key = `${at}::json:${label}`;
+      const wanted = hashValue(payload.value);
+      const held = claims.get(key) ?? [];
+      const shareable = held.length > 0 && held.every((claim) => claim.hash === wanted);
+
+      if (held.length > 0 && !shareable) {
         conflicts.push({
           path: relativePath,
-          detail: `${label} is owned by bundle "${owner}"`,
-          owner,
+          detail: `${label} is owned by ${owners(held)}`,
+          owner: claimingBundles(held)[0] as string,
           resource,
           pointer: payload.pointer,
         });
         continue;
       }
+
       const doc = await readJsonCached(relativePath);
       const existing = doc === undefined ? undefined : getAtPointer(doc, payload.pointer);
       if (existing === undefined) continue;
 
+      const identical = hashValue(existing) === wanted;
+
+      if (shareable) {
+        if (identical) action.share = true;
+        else if (!weWroteIt(mine, key) && !unchangedSinceWeWroteIt(mine, key, existing)) {
+          conflicts.push({
+            path: relativePath,
+            detail: `${label} was changed since another bundle installed it`,
+            owner: claimingBundles(held)[0] as string,
+            resource,
+            pointer: payload.pointer,
+          });
+        }
+        continue;
+      }
+
       if (!weWroteIt(mine, key)) {
-        if (hashValue(existing) === hashValue(payload.value)) action.adopt = true;
+        if (identical) action.adopt = true;
         else {
           conflicts.push({
             path: relativePath,
@@ -212,10 +265,7 @@ export async function detectConflicts(
         continue;
       }
 
-      if (
-        hashValue(existing) !== hashValue(payload.value) &&
-        !unchangedSinceWeWroteIt(mine, key, existing)
-      ) {
+      if (!identical && !unchangedSinceWeWroteIt(mine, key, existing)) {
         conflicts.push({
           path: relativePath,
           detail: `${label} already set to a different value`,
@@ -227,18 +277,25 @@ export async function detectConflicts(
     }
 
     if (payload.kind === 'json-array-item') {
-      // Appending to a list is additive; another bundle owning other items is fine.
+      // Appending to a list is additive, so it never collides -- but an item
+      // another installation contributed has to be claimed rather than silently
+      // skipped, or removing that one would take ours away with it.
+      const pointer = payload.pointer.join('.');
+      const shared = payload.items
+        .map((item) => hashValue(item))
+        .filter((hash) => (claims.get(`${at}::item:${pointer}:${hash}`) ?? []).length > 0);
+      if (shared.length > 0) action.shareItems = shared;
       continue;
     }
 
     // Marker blocks.
     const existing = await readTextCached(relativePath);
-    const owner = owners.get(`${relativePath}::block:${payload.blockId}`);
-    if (owner) {
+    const heldBlock = claims.get(`${at}::block:${payload.blockId}`) ?? [];
+    if (heldBlock.length > 0) {
       conflicts.push({
         path: relativePath,
-        detail: `block ${payload.blockId} is owned by bundle "${owner}"`,
-        owner,
+        detail: `block ${payload.blockId} is owned by ${owners(heldBlock)}`,
+        owner: claimingBundles(heldBlock)[0] as string,
         resource,
       });
       continue;
@@ -289,6 +346,12 @@ export async function detectConflicts(
   }
 
   return conflicts;
+}
+
+/** "bundle \"alpha\"", or "bundles \"alpha\", \"beta\"" -- for conflict messages. */
+function owners(claims: Claim[]): string {
+  const names = claimingBundles(claims);
+  return `${names.length === 1 ? 'bundle' : 'bundles'} ${names.map((name) => `"${name}"`).join(', ')}`;
 }
 
 /**

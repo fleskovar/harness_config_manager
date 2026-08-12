@@ -187,9 +187,15 @@ describe('an MCP server that is already configured, identically', () => {
     await record(await plan(first), first);
 
     // A second bundle shipping the same server sees no owner to collide with.
-    // (Its subagent does collide -- both fixtures ship one called "planner" --
-    // which is exactly the contrast: written items are owned, adopted ones are not.)
-    const second = await plan(await makeBundle('scheduler'));
+    // (Its subagent does collide -- both fixtures ship one called "planner",
+    // and this one's says something else -- which is exactly the contrast:
+    // written items are owned, adopted ones are not.)
+    const secondRoot = await makeBundle('scheduler');
+    await fs.writeFile(
+      path.join(secondRoot, 'subagents', 'planner.md'),
+      '---\ndescription: Schedules work\n---\n\nA different prompt entirely.\n',
+    );
+    const second = await plan(secondRoot);
 
     expect(second.conflicts.map((conflict) => conflict.path)).toEqual([
       '.claude/agents/planner.md',

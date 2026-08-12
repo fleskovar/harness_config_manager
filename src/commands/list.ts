@@ -88,9 +88,15 @@ async function listInstalled(options: ListOptions): Promise<void> {
     log.plain(color.bold(`\n${scope} scope`));
     for (const record of scoped) {
       const when = record.installedAt.slice(0, 10);
+      // A bundle nobody asked for by name is here for something else's sake,
+      // and goes when that something else does.
+      const why = record.auto ? color.dim(' [dependency]') : '';
+      const needs = record.dependencies?.length
+        ? color.dim(` · requires ${record.dependencies.map((d) => d.name).join(', ')}`)
+        : '';
       log.plain(
-        `  ${color.green('●')} ${color.bold(record.bundle)} ${color.dim(`v${record.version}`)} ` +
-          `→ ${record.target} ${color.dim(`· ${record.receipts.length} item(s) · ${when}`)}`,
+        `  ${color.green('●')} ${color.bold(record.bundle)} ${color.dim(`v${record.version}`)}${why} ` +
+          `→ ${record.target} ${color.dim(`· ${record.receipts.length} item(s) · ${when}`)}${needs}`,
       );
     }
   }

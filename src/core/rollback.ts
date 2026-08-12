@@ -5,6 +5,13 @@
  * (pointer + value hash) or by marker block -- never by position. Anything
  * that no longer matches what we wrote is reported as `modified` and left
  * alone unless `--force` is given, so hand edits are never silently discarded.
+ *
+ * Nor is an item removed while somebody else still needs it. Bundles share
+ * items -- a dependency's asset, a permission two bundles both ask for -- and
+ * each installation that wrote one holds a claim on it. An item another claim
+ * still covers is reported `held` and left where it is, so the last uninstall
+ * is the one that takes it away. `--force` does not override this: the item
+ * belongs to an installation that is staying.
  */
 
 import path from 'node:path';
@@ -25,9 +32,17 @@ import {
   removeArrayItems,
   removeAtPointer,
 } from '../merge/json-merge.js';
+import { type Claim, claimingBundles, claimKeys } from './state.js';
 import { isPreexisting, type InstallationRecord, type Receipt } from './types.js';
 
-export type RemovalStatus = 'removed' | 'restored' | 'missing' | 'modified' | 'partial' | 'kept';
+export type RemovalStatus =
+  | 'removed'
+  | 'restored'
+  | 'missing'
+  | 'modified'
+  | 'partial'
+  | 'kept'
+  | 'held';
 
 export interface RemovalResult {
   receipt: Receipt;
@@ -40,6 +55,12 @@ export interface RollbackOptions {
   force?: boolean;
   /** Report what would happen without touching anything. */
   dryRun?: boolean;
+  /**
+   * What other installations claim, keyed as `core/state.ts` keys them. Items
+   * covered by a claim are held rather than removed. Omitted -- as `hcm status`
+   * omits it -- every item is judged on its own.
+   */
+  claims?: Map<string, Claim[]>;
 }
 
 export async function rollback(
@@ -69,6 +90,22 @@ export async function rollback(
   return results;
 }
 
+/**
+ * Who else is relying on this receipt's item. Empty when nothing is, when no
+ * claims were supplied, or -- for an array receipt -- when only some of its
+ * items are held, which `rollbackJson` handles hash by hash.
+ */
+function holders(receipt: Receipt, scopeRoot: string, options: RollbackOptions): Claim[] {
+  if (!options.claims) return [];
+  const keys = claimKeys(receipt, scopeRoot);
+  return keys.flatMap(({ key }) => options.claims?.get(key) ?? []);
+}
+
+/** "still required by alpha, beta" -- the reason an item was left alone. */
+function heldDetail(claims: Claim[]): string {
+  return `still required by ${claimingBundles(claims).join(', ')}`;
+}
+
 function groupByPath(receipts: Receipt[]): Map<string, Receipt[]> {
   const groups = new Map<string, Receipt[]>();
   // Reverse so later writes are undone first.
@@ -93,6 +130,12 @@ async function rollbackFiles(
 
     if (isPreexisting(receipt)) {
       results.push({ receipt, status: 'kept', detail: 'was already here before we installed' });
+      continue;
+    }
+
+    const held = holders(receipt, scopeRoot, options);
+    if (held.length > 0) {
+      results.push({ receipt, status: 'held', detail: heldDetail(held) });
       continue;
     }
 
@@ -134,6 +177,16 @@ async function rollbackBlocks(
 
   for (const receipt of receipts) {
     if (receipt.op !== 'block') continue;
+
+    // Two targets can share one instruction file and one block in it -- Pi and
+    // OpenCode both write AGENTS.md. Removing it because one of them is going
+    // would leave the other's receipt pointing at nothing.
+    const held = holders(receipt, scopeRoot, options);
+    if (held.length > 0) {
+      results.push({ receipt, status: 'held', detail: heldDetail(held) });
+      continue;
+    }
+
     const next = removeBlock(content, receipt.syntax, receipt.blockId);
     if (next === undefined) {
       results.push({ receipt, status: 'missing', detail: 'marker block not found' });
@@ -181,6 +234,12 @@ async function rollbackJson(
         continue;
       }
 
+      const held = holders(receipt, scopeRoot, options);
+      if (held.length > 0) {
+        results.push({ receipt, status: 'held', detail: heldDetail(held) });
+        continue;
+      }
+
       const outcome = removeAtPointer(doc, receipt.pointer, receipt.hash, {
         restore: receipt.previous,
         hadPrevious: receipt.hadPrevious,
@@ -201,18 +260,49 @@ async function rollbackJson(
     }
 
     if (receipt.op === 'json-array-item') {
-      const { removed, missing } = removeArrayItems(doc, receipt.pointer, receipt.hashes);
+      // Items are claimed one at a time: two bundles may ask for one permission
+      // in common and one each. Only the ones nobody else wants come out.
+      const claims = options.claims;
+      const heldHashes = claims
+        ? receipt.hashes.filter((hash) =>
+            claimKeys({ ...receipt, hashes: [hash] }, scopeRoot).some(
+              ({ key }) => (claims.get(key) ?? []).length > 0,
+            ),
+          )
+        : [];
+      const heldClaims = heldHashes.flatMap((hash) =>
+        claimKeys({ ...receipt, hashes: [hash] }, scopeRoot).flatMap(
+          ({ key }) => claims?.get(key) ?? [],
+        ),
+      );
+      const removable = receipt.hashes.filter((hash) => !heldHashes.includes(hash));
+
+      if (removable.length === 0) {
+        results.push({
+          receipt,
+          status: receipt.hashes.length === 0 ? 'missing' : 'held',
+          ...(heldClaims.length > 0 ? { detail: heldDetail(heldClaims) } : {}),
+        });
+        continue;
+      }
+
+      const { removed, missing } = removeArrayItems(doc, receipt.pointer, removable);
       if (removed > 0) {
         changed = true;
         pruneEmptyAncestors(doc, receipt.pointer);
       }
 
+      const notes = [
+        ...(missing > 0 ? [`${missing} item(s) already gone`] : []),
+        ...(heldHashes.length > 0 ? [`${heldHashes.length} ${heldDetail(heldClaims)}`] : []),
+      ];
       const status: RemovalStatus =
-        removed === 0 ? 'missing' : missing > 0 ? 'partial' : 'removed';
+        removed === 0 ? 'missing' : missing > 0 || heldHashes.length > 0 ? 'partial' : 'removed';
+
       results.push({
         receipt,
         status,
-        ...(missing > 0 ? { detail: `${missing} item(s) already gone` } : {}),
+        ...(notes.length > 0 ? { detail: notes.join(', ') } : {}),
       });
     }
   }

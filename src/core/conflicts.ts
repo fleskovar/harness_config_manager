@@ -110,7 +110,13 @@ export async function resolvePlanConflicts(
     )?.resource;
     if (!current) return undefined;
 
-    const fresh = resourceActions(target, { ...current, name: newName }, bundleName, plan.scope);
+    const fresh = resourceActions(
+      target,
+      { ...current, name: newName },
+      bundleName,
+      plan.scope,
+      plan.targetOptions,
+    );
     const { kept, insertAt } = extract(actions, key);
     // Only the *other* resources get their references rewritten: the renamed
     // one was regenerated, and rewriting it would also rename its command.
@@ -150,14 +156,7 @@ export async function resolvePlanConflicts(
   }
 
   if (carried) {
-    conflicts = await detectConflicts(
-      actions,
-      plan.scopeRoot,
-      bundleName,
-      plan.target,
-      plan.scope,
-      options.cwd,
-    );
+    conflicts = await detectConflicts(actions, plan.scopeRoot, bundleName, options.cwd);
   }
 
   if (conflicts.length === 0) {
@@ -215,14 +214,7 @@ export async function resolvePlanConflicts(
       outcomes.push(outcome);
     }
 
-    conflicts = await detectConflicts(
-      actions,
-      plan.scopeRoot,
-      bundleName,
-      plan.target,
-      plan.scope,
-      options.cwd,
-    );
+    conflicts = await detectConflicts(actions, plan.scopeRoot, bundleName, options.cwd);
   }
 
   const unresolved = conflicts.filter((conflict) => !accepted.has(groupKey(conflict)));

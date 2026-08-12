@@ -1,9 +1,20 @@
-import type { BundleResource, PlanAction, ResourceKind, Scope, TargetId } from '../core/types.js';
+import type {
+  BundleResource,
+  PlanAction,
+  ResourceKind,
+  Scope,
+  TargetId,
+  TargetOptions,
+} from '../core/types.js';
+
+export type { TargetOptions };
 
 export interface TargetContext {
   /** Bundle name, used for block ids and conflict messages. */
   bundle: string;
   scope: Scope;
+  /** What is installed on this machine; see `TargetOptions`. */
+  options: TargetOptions;
 }
 
 export interface Target {
@@ -14,6 +25,8 @@ export interface Target {
   scopeRoot(scope: Scope, cwd: string): string;
   /** Kinds this target knows how to install. */
   supports: ResourceKind[];
+  /** Anything about this harness a user should know before installing into it. */
+  notes?: string[];
   /**
    * Map one canonical resource to the writes it implies.
    * Returning `[]` means "nothing to do"; unsupported kinds are filtered out

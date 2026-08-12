@@ -206,6 +206,7 @@ export async function addToRegistry(
       version: bundle.manifest.version,
       ...(bundle.manifest.description ? { description: bundle.manifest.description } : {}),
       ...(bundle.manifest.tags ? { tags: bundle.manifest.tags } : {}),
+      ...(bundle.dependencies.length > 0 ? { dependencies: bundle.dependencies } : {}),
       ...(options.dev ? { dev: true } : { store: storeSlug({ id, name }) }),
       addedAt: existing?.addedAt ?? new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -283,9 +284,14 @@ async function persistRefresh(
     version: bundle.manifest.version,
     ...(bundle.manifest.description ? { description: bundle.manifest.description } : {}),
     ...(bundle.manifest.tags ? { tags: bundle.manifest.tags } : {}),
+    // Replaced wholesale, so a dependency dropped upstream disappears here too.
+    ...(bundle.dependencies.length > 0 ? { dependencies: bundle.dependencies } : {}),
     ...(entry.dev ? {} : { store: entry.store ?? storeSlug(entry) }),
     updatedAt: new Date().toISOString(),
   };
+
+  // A bundle that has stopped requiring anything should stop saying it does.
+  if (bundle.dependencies.length === 0) delete updated.dependencies;
 
   const index = registry.entries.indexOf(current);
   if (index >= 0) registry.entries[index] = updated;

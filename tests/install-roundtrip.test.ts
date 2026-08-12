@@ -11,7 +11,7 @@ import { loadBundle } from '../src/core/bundle.js';
 import { applyPlan } from '../src/core/executor.js';
 import { buildPlan } from '../src/core/planner.js';
 import { rollback } from '../src/core/rollback.js';
-import { upsertInstallation } from '../src/core/state.js';
+import { collectClaims, removeInstallation, upsertInstallation } from '../src/core/state.js';
 import { installationId, type InstallationRecord, type TargetId } from '../src/core/types.js';
 
 let workspace: string;
@@ -418,23 +418,32 @@ describe('pi target', () => {
     expect(await exists('.mcp.json')).toBe(false);
   });
 
-  it('shares .mcp.json with Claude Code without either owning it', async () => {
+  it('shares .mcp.json with Claude Code, one entry claimed by both', async () => {
     const alpha = await makeBundle('alpha', 'alpha-server', 'Read(**)');
-    await install(alpha, 'claude-code');
+    const claudeRecord = await install(alpha, 'claude-code');
     const piRecord = await install(alpha, 'pi');
 
-    // The second install finds an identical entry and adopts it -- recorded as
-    // a dependency, but not ours to delete.
-    const adopted = piRecord.receipts.find(
+    // The second install finds an identical entry and shares it: no second
+    // copy, and a claim of its own rather than a claim on somebody else's.
+    const shared = piRecord.receipts.find(
       (receipt) => receipt.op === 'json-value' && receipt.path === '.mcp.json',
     );
-    expect(adopted).toMatchObject({ preexisting: true });
+    expect(shared?.op === 'json-value' && shared.preexisting).toBeUndefined();
 
-    // So removing Pi leaves Claude Code's server exactly where it was.
-    await rollback(piRecord, projectDir);
+    // So removing Pi leaves Claude Code's server exactly where it was...
+    const claims = await collectClaims(projectDir, { excludeIds: [piRecord.id] });
+    const results = await rollback(piRecord, projectDir, { claims });
+    expect(results.find((result) => result.receipt.path === '.mcp.json')?.status).toBe('held');
     expect(await readJson('.mcp.json')).toEqual({
       mcpServers: { 'alpha-server': { command: 'alpha-server', args: ['--serve'] } },
     });
+
+    // ...and removing the last claimant takes it away.
+    await removeInstallation('project', projectDir, piRecord.id);
+    await rollback(claudeRecord, projectDir, {
+      claims: await collectClaims(projectDir, { excludeIds: [claudeRecord.id] }),
+    });
+    expect(await exists('.mcp.json')).toBe(false);
   });
 
   it('installs a subagent as a skill, not an agents file', async () => {
@@ -464,6 +473,102 @@ describe('pi target', () => {
   });
 });
 
+describe('pi with the pi-subagents extension', () => {
+  const withExtension = { piSubagents: true };
+
+  /** Install, telling the planner the extension is there. */
+  async function installWithExtension(bundleRoot: string): Promise<InstallationRecord> {
+    const bundle = await loadBundle(bundleRoot);
+    const plan = await buildPlan(bundle, 'pi', 'project', projectDir, withExtension);
+    expect(plan.conflicts).toEqual([]);
+    const receipts = await applyPlan(plan);
+
+    const record: InstallationRecord = {
+      id: installationId(bundle.manifest.name, 'pi', 'project'),
+      bundle: bundle.manifest.name,
+      version: bundle.manifest.version,
+      target: 'pi',
+      scope: 'project',
+      source: { type: 'local', path: bundleRoot },
+      installedAt: new Date().toISOString(),
+      receipts,
+      targetOptions: withExtension,
+    };
+
+    await upsertInstallation('project', projectDir, record);
+    return record;
+  }
+
+  it('files a subagent in the directory the extension scans', async () => {
+    const alpha = await makeBundle('alpha', 'alpha-server', 'Read(**)');
+    const record = await installWithExtension(alpha);
+
+    // .pi/agents/**/*.md is what pi-subagents discovers at project scope.
+    expect(await exists('.pi/agents/alpha-reviewer.md')).toBe(true);
+    // ...and it is not also left as a skill, which is where stock Pi puts it.
+    expect(await exists('.pi/skills/alpha-reviewer/SKILL.md')).toBe(false);
+
+    const agent = await readText('.pi/agents/alpha-reviewer.md');
+    expect(agent).toContain('name: alpha-reviewer');
+    expect(agent).toContain('description: Reviews code');
+    // The extension has real fields for these, so they stop being dropped.
+    expect(agent).toContain('tools: Read, Grep');
+    expect(agent).toContain('Review the code.');
+
+    await rollback(record, projectDir);
+    expect(await exists('.pi/agents/alpha-reviewer.md')).toBe(false);
+  });
+
+  it('leaves every other kind exactly where it was', async () => {
+    const alpha = await makeBundle('alpha', 'alpha-server', 'Read(**)');
+    await installWithExtension(alpha);
+
+    expect(await exists('.pi/skills/dependency-audit')).toBe(false); // none in this bundle
+    expect(await readText('AGENTS.md')).toContain('Instructions from alpha.');
+    expect(await exists('.mcp.json')).toBe(true);
+    expect(await exists('.pi/settings.json')).toBe(true);
+  });
+
+  it('carries a model through, and omits what the bundle did not set', async () => {
+    const root = path.join(workspace, 'gamma');
+    await fs.mkdir(path.join(root, 'subagents'), { recursive: true });
+    await fs.writeFile(path.join(root, 'hcm.yaml'), 'name: gamma\nversion: 1.0.0\n');
+    await fs.writeFile(
+      path.join(root, 'subagents', 'scout.md'),
+      '---\ndescription: Fast recon\nmodel: claude-haiku-4-5\n---\n\nScout the codebase.\n',
+    );
+
+    await installWithExtension(root);
+
+    const agent = await readText('.pi/agents/scout.md');
+    expect(agent).toContain('model: claude-haiku-4-5');
+    // No tools in the bundle, so no empty allowlist that would restrict it.
+    expect(agent).not.toContain('tools:');
+  });
+
+  it('keeps a subagent and a skill of the same name apart', async () => {
+    // Stock Pi files both as skills/<name>/, so the two collide there. With the
+    // extension they are different directories and can coexist.
+    const root = path.join(workspace, 'delta');
+    await fs.mkdir(path.join(root, 'subagents'), { recursive: true });
+    await fs.mkdir(path.join(root, 'skills', 'auditor'), { recursive: true });
+    await fs.writeFile(path.join(root, 'hcm.yaml'), 'name: delta\nversion: 1.0.0\n');
+    await fs.writeFile(
+      path.join(root, 'subagents', 'auditor.md'),
+      '---\ndescription: Audits\n---\n\nAudit it.\n',
+    );
+    await fs.writeFile(
+      path.join(root, 'skills', 'auditor', 'SKILL.md'),
+      '---\ndescription: Audit checklist\n---\n\nThe checklist.\n',
+    );
+
+    await installWithExtension(root);
+
+    expect(await readText('.pi/agents/auditor.md')).toContain('Audit it.');
+    expect(await readText('.pi/skills/auditor/SKILL.md')).toContain('The checklist.');
+  });
+});
+
 describe('conflict detection', () => {
   it('flags a TOML table that already exists', async () => {
     await fs.writeFile(
@@ -479,10 +584,15 @@ describe('conflict detection', () => {
     expect(plan.conflicts[0]?.detail).toContain('[permissions]');
   });
 
-  it('flags an item another installed bundle already owns', async () => {
-    // Two bundles that both ship an MCP server called "shared".
+  it('flags an item another installed bundle already owns, differently', async () => {
+    // Two bundles that both ship an MCP server called "shared" -- and define it
+    // differently, which is what makes it a collision rather than a shared item.
     const alpha = await makeBundle('alpha', 'shared', 'Read(**)');
     const beta = await makeBundle('beta', 'shared', 'Bash(git:*)');
+    await fs.writeFile(
+      path.join(beta, 'mcp', 'shared.json'),
+      JSON.stringify({ command: 'shared', args: ['--other-flags'] }),
+    );
 
     const record = await install(alpha, 'claude-code');
     // Record the install so ownership is visible to the planner.

@@ -28,6 +28,22 @@ export type ResourceKind =
   | 'settings' // settings fragment merged into harness config
   | 'asset'; // copied verbatim
 
+/**
+ * Facts about the machine being installed into that change how a target maps
+ * resources -- not preferences, but what is actually there to install onto.
+ *
+ * These are recorded with the installation, so `hcm update` reinstalls into the
+ * same places without being told again.
+ */
+export interface TargetOptions {
+  /**
+   * The `pi-subagents` extension is installed, so Pi has real sub-agents and a
+   * directory to file them in (`.pi/agents/`) instead of only skills.
+   * https://github.com/nicobailon/pi-subagents
+   */
+  piSubagents?: boolean;
+}
+
 /** Bundle directory name -> canonical kind. This is the whole bundle schema. */
 export const KIND_DIRECTORIES: Record<string, ResourceKind> = {
   subagents: 'subagent',
@@ -44,6 +60,28 @@ export const KIND_DIRECTORIES: Record<string, ResourceKind> = {
 // Manifest
 // ---------------------------------------------------------------------------
 
+/**
+ * One entry of a manifest's `dependencies`.
+ *
+ * A bundle that describes how to work with the team's JIRA board is worth
+ * writing once and requiring from the half-dozen bundles that assume it. The
+ * dependency names the bundle; `version` says which releases will do; `source`
+ * says where to get it when the machine has never heard of it.
+ *
+ * Authored either as a string (`jira-board`, `jira-board@^1.2.0`) or as a
+ * mapping; `normalizeDependencies` turns both into this shape.
+ */
+export interface BundleDependency {
+  name: string;
+  /** Semver range; absent means any version will do. See `core/semver.ts`. */
+  version?: string;
+  /**
+   * Where to fetch it from when it is not registered and not a sibling in the
+   * same collection -- any reference `hcm install` accepts.
+   */
+  source?: string;
+}
+
 export interface BundleManifest {
   name: string;
   version: string;
@@ -53,6 +91,8 @@ export interface BundleManifest {
   tags?: string[];
   /** Targets this bundle supports. Defaults to all. */
   targets?: TargetId[];
+  /** Bundles that have to be installed for this one to work. */
+  dependencies?: (string | BundleDependency)[];
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +122,8 @@ export interface LoadedBundle {
   root: string;
   resources: BundleResource[];
   source: BundleSource;
+  /** `manifest.dependencies`, in one shape, validated at load time. */
+  dependencies: BundleDependency[];
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +146,11 @@ export interface RegistryEntry {
   version?: string;
   description?: string;
   tags?: string[];
+  /**
+   * What the bundle's manifest required when it was registered, so the tree can
+   * be shown without reading every stored bundle from disk.
+   */
+  dependencies?: BundleDependency[];
   /**
    * Directory name inside the store holding this bundle's files. Absent for
    * `--dev` entries, which are read from `source` in place.
@@ -194,6 +241,15 @@ export function describeReceipt(receipt: Receipt): string {
 // Installation state
 // ---------------------------------------------------------------------------
 
+/** A dependency as it stood when the dependent was installed. */
+export interface InstalledDependency {
+  name: string;
+  /** The version actually installed, not the range that was asked for. */
+  version: string;
+  /** The range the manifest asked for, when it asked for one. */
+  range?: string;
+}
+
 export interface InstallationRecord {
   /** `${bundle}@${target}@${scope}` */
   id: string;
@@ -204,6 +260,21 @@ export interface InstallationRecord {
   source: BundleSource;
   installedAt: string;
   receipts: Receipt[];
+  /**
+   * What the target was told about this machine. Absent means the defaults --
+   * which is what every record written before these existed meant too.
+   */
+  targetOptions?: TargetOptions;
+  /**
+   * The bundles this one required, resolved at install time. `hcm uninstall`
+   * reads these to know what is still needed, and what has been orphaned.
+   */
+  dependencies?: InstalledDependency[];
+  /**
+   * Pulled in to satisfy somebody else's dependency rather than asked for.
+   * Uninstalling the last bundle that needed it takes it away again.
+   */
+  auto?: boolean;
 }
 
 export interface StateFile {
@@ -280,6 +351,19 @@ export interface PlanAction {
   resource?: BundleResource;
   /** Already present and identical: record it, but do not write or own it. */
   adopt?: boolean;
+  /**
+   * Another installation already wrote exactly this item. Nothing needs
+   * writing, but we do claim it: the item stays until the last claimant goes.
+   * This is how two bundles ship the same shared asset without a second copy
+   * and without one uninstall breaking the other.
+   */
+  share?: boolean;
+  /**
+   * For appends to a JSON array: hashes of items another installation already
+   * contributed. They are recorded as ours too, so the item survives until
+   * every bundle that wanted it has gone.
+   */
+  shareItems?: string[];
 }
 
 /** Stable key for "the same resource", used to group and remember decisions. */
@@ -302,6 +386,8 @@ export interface InstallPlan {
   bundle: LoadedBundle;
   target: TargetId;
   scope: Scope;
+  /** Carried on the plan so a resolved conflict can regenerate actions the same way. */
+  targetOptions: TargetOptions;
   /** Absolute root the action paths are relative to. */
   scopeRoot: string;
   actions: PlanAction[];

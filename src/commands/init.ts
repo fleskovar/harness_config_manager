@@ -21,6 +21,12 @@ version: 0.1.0
 description: A harness config bundle
 # Omit "targets" to support all of them.
 # targets: [claude-code, copilot, reasonix, opencode, pi]
+# Bundles this one needs. Installed first, and removed again when nothing else
+# requires them. Give anything you publish a "source" so it resolves elsewhere.
+# dependencies:
+#   - shared-conventions@^1.0.0
+#   - name: jira-board
+#     source: acme/agent-kits/jira-board
 `,
 
     'README.md': `# ${name}

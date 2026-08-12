@@ -11,6 +11,9 @@ export function targetsCommand(options: { cwd: string }): void {
       log.plain(color.dim(`  ${scope.padEnd(8)} ${target.scopeRoot(scope, options.cwd)}`));
     }
     log.plain(color.dim(`  kinds:   ${target.supports.join(', ')}`));
+    for (const [index, note] of (target.notes ?? []).entries()) {
+      log.plain(color.dim(`  ${index === 0 ? 'note:   ' : '        '} ${note}`));
+    }
     log.plain('');
   }
 }

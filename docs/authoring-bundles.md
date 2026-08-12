@@ -34,10 +34,59 @@ tags: [review, typescript]
 targets: [claude-code, copilot]   # optional; omit to support all
                                   # known ids: claude-code, copilot, reasonix,
                                   #            opencode, pi
+dependencies:                     # optional; see below
+  - jira-board@^1.2.0
 ```
 
 Set `targets` only when a bundle genuinely does not make sense elsewhere.
 Installing into an unlisted target is refused rather than silently partial.
+
+## Depending on another bundle
+
+When several of your kits assume the same background — how the team's JIRA board
+is laid out, which database the services use — write that once and require it:
+
+```yaml
+dependencies:
+  - jira-board                       # any version
+  - team-conventions@^2.0.0          # a range
+  - name: db-kit                     # the long form
+    version: ">=2.1 <3"
+    source: acme/agent-kits/db-kit   # where to find it, if it is not registered
+```
+
+`hcm install my-kit` then installs `jira-board` first, and `hcm uninstall
+my-kit` takes it away again unless something else still needs it. Users see the
+tree before anything is written.
+
+**Give a `source` to anything you publish.** A dependency is looked for in the
+registry, then beside your bundle in the same collection, then at its `source`.
+The first two are what make authoring pleasant — a monorepo of kits resolves
+with nothing registered — but neither is available to someone who has just
+pasted your repo URL. `hcm validate` runs the same lookup and will tell you:
+
+```
+$ hcm validate ./my-kit
+my-kit v1.0.0
+  4 resource(s)
+!   "my-kit" requires the bundle "jira-board", which hcm cannot find
+```
+
+**Version ranges** are the familiar subset: `1.2.3`, `^1.2.3`, `~1.2.3`,
+`>=1.2.3`, `1.2.x`, `*`, and those joined by a space (*and*) or `||` (*or*). A
+range hcm does not understand is refused when the manifest is read, rather than
+matching nothing later. Only one version of a bundle can be installed in a
+scope, so prefer a wide range (`^1.2.0`) over a pinned one: two kits that pin
+different patch versions of the same dependency cannot both be installed.
+
+**Keep the graph shallow, and never circular.** A cycle is refused with the loop
+named; if two bundles genuinely need each other, the shared part wants to be a
+third bundle they both require.
+
+Depending on a bundle is also the way to *share* resources deliberately. If your
+kit ships the same `skills/jira-board/` as the bundle it requires, byte for
+byte, the second install writes nothing and both claim the one copy — see
+[Conventions that avoid conflicts](#conventions-that-avoid-conflicts).
 
 ## Writing each resource kind
 
@@ -82,6 +131,22 @@ frontmatter is just `name` and `description`, so `tools` and `model` have
 nowhere to go and are dropped; and without delegation the prompt runs in the
 main context rather than its own. As on Reasonix, subagents and skills share one
 namespace — `hcm validate` flags a name used by both.
+
+Users who have installed [`pi-subagents`](https://github.com/nicobailon/pi-subagents)
+get the better mapping by passing `hcm install --pi-subagents`: the subagent is
+written to `.pi/agents/<name>.md`, which is the directory that extension scans,
+and `tools` and `model` survive because it has fields for them. Nothing in the
+bundle changes — this is a fact about the user's machine, not about your kit —
+so write `tools` and `model` as you would for any other target and let the
+people who have the extension benefit from them.
+
+One thing to know if you ship a `tools` allowlist: `hcm` translates the *shape*
+of frontmatter between harnesses, never the tool names themselves, and the
+names differ. `pi-subagents` documents `tools` as a **strict** allowlist over
+its own vocabulary (`read, grep, bash`, plus `mcp:<server>` entries), so a list
+written as Claude Code's `[Read, Grep]` will not match anything there. Either
+leave `tools` off — the extension's default is unrestricted — or accept that the
+allowlist is meaningful on one harness at a time.
 
 ### Skills — `skills/<name>/SKILL.md` plus supporting files
 
@@ -385,9 +450,21 @@ install reports the server as adopted and leaves the file untouched; if they
 differ, you are asked what to do. Seeing both tells you how your bundle lands in
 a project that is not empty.
 
+If your bundle has dependencies, install it into an empty directory and then
+uninstall it: everything it pulled in should go too, and the directory should be
+as it started. Then install the dependency by name first and repeat — this time
+it should stay, because you asked for it yourself.
+
 ## Conventions that avoid conflicts
 
-Bundles collide when two of them claim the same item. Cheap habits that prevent it:
+Bundles collide when two of them want the same item and want it to say something
+*different*. Wanting the same item identically is not a collision: hcm writes it
+once, records a claim for each bundle, and removes it when the last of them is
+uninstalled. So two kits can both ship `skills/jira-board/` — as long as the
+files really are identical, which in practice means one of them depends on the
+other and copies it, or both are generated from the same place.
+
+Cheap habits that prevent the collisions that remain:
 
 - **Namespace MCP server filenames** when wrapping a common service:
   `mcp/acme-postgres.json`, not `mcp/postgres.json`.
@@ -397,6 +474,9 @@ Bundles collide when two of them claim the same item. Cheap habits that prevent 
   merges additively; settings keys are exclusive.
 - **Keep one concern per bundle.** Users install and uninstall at bundle
   granularity, so a bundle bundling unrelated things forces all-or-nothing.
+  Where two kits share a concern, a `dependencies:` entry beats a copy — the
+  shared part is then installed once, kept up to date in one place, and removed
+  when the last kit that needed it goes.
 - **Refer to your MCP servers by name, plainly.** When a user hits a name clash
   they can install your server under a different name, and `hcm` rewrites the
   mentions in the rest of your bundle to match. That works on `mcp__<name>__tool`

@@ -73,6 +73,9 @@ description: What this bundle is for
 tags: [review, typescript]
 # Omit "targets" to support all of them.
 targets: [claude-code, copilot, reasonix, opencode, pi]
+# Bundles this one needs; installed first. See "Dependencies" below.
+dependencies:
+  - jira-board@^1.2.0
 ```
 
 ## Where things land
@@ -93,7 +96,7 @@ harness's home directory (`hcm targets` prints the exact paths on your machine).
 
 | Kind | OpenCode | Pi |
 | --- | --- | --- |
-| subagent | `.opencode/agents/<n>.md` | `.pi/skills/<n>/SKILL.md` |
+| subagent | `.opencode/agents/<n>.md` | `.pi/skills/<n>/SKILL.md`, or `.pi/agents/<n>.md` with `--pi-subagents` |
 | skill | `.opencode/skills/<n>/` | `.pi/skills/<n>/` |
 | command | `.opencode/commands/<n>.md` | `.pi/prompts/<n>.md` |
 | rule | `.opencode/rules/<n>.md` + `opencode.json` → `instructions[]` | `AGENTS.md` |
@@ -138,7 +141,8 @@ Every target has a home for every kind, but the fit is not always exact:
   delegation the prompt runs in the main context rather than its own). MCP
   servers go to the same `.mcp.json`, in the same `mcpServers` shape, that
   Claude Code uses — inert until an MCP extension is installed, correct once it
-  is.
+  is. If you *have* installed the sub-agent extension, say so — see
+  [`--pi-subagents`](#pi-subagents) below.
 - **OpenCode has no glob-scoped rule format**, but it does read extra
   instruction files listed in `instructions`. So a rule becomes a file *and* one
   entry appended to that array — appended, never replaced, so several bundles
@@ -146,18 +150,167 @@ Every target has a home for every kind, but the fit is not always exact:
   on uninstall.
 
 Finally, two files are genuinely shared between harnesses rather than owned by
-one, and they behave differently when a bundle goes into both targets:
-
-- **`.mcp.json`** (Claude Code and Pi). The second install finds the entry
-  already there and identical, so it *adopts* it — recorded as a dependency,
-  but not its to delete. Uninstalling either target leaves the other's server
-  in place and `hcm status` stays green. Nothing to think about.
-- **`AGENTS.md`** (OpenCode and Pi). Marker blocks are always rewritten rather
-  than adopted, so the two installs share one block: uninstalling from *either*
-  takes it away, and the survivor shows up as `missing` under `hcm status`
-  until you reinstall it. Worth knowing if you run both harnesses side by side.
+one: **`.mcp.json`** (Claude Code and Pi) and **`AGENTS.md`** (OpenCode and Pi).
+Installing one bundle into both harnesses writes the shared item once, and both
+installations claim it — so uninstalling from either leaves the other working,
+and the item goes when the second one does. See
+[Shared items](#shared-items-written-once-claimed-by-everyone-who-needs-them).
 
 Everything outside those two files is per-target and unaffected.
+
+### pi-subagents
+
+Pi's sub-agent support is an extension,
+[`pi-subagents`](https://github.com/nicobailon/pi-subagents), and it scans a
+directory stock Pi knows nothing about. `hcm` cannot tell whether you have
+installed it, so tell it:
+
+```bash
+hcm install my-kit -t pi --pi-subagents
+```
+
+| | Without | With `--pi-subagents` |
+| --- | --- | --- |
+| project | `.pi/skills/<n>/SKILL.md` | `.pi/agents/<n>.md` |
+| user | `~/.pi/agent/skills/<n>/SKILL.md` | `~/.pi/agent/agents/<n>.md` |
+| frontmatter | `name`, `description` | `name`, `description`, `tools`, `model` |
+| invoked as | `/skill:<n>`, in the main context | `subagent({ agent: "<n>" })`, in a child session |
+
+The extension has fields for `tools` and `model`, so a subagent that would have
+had them dropped keeps them. It also ends the shared namespace: a subagent and a
+skill of the same name are two files in two directories rather than one
+collision, though `hcm validate` still flags the pair because Reasonix keeps it.
+
+`tools` is passed through as written. `hcm` translates the shape of frontmatter,
+never the tool names inside it — and `pi-subagents` treats the list as a strict
+allowlist over its own vocabulary (`read`, `grep`, `bash`, `mcp:<server>`), so a
+list written for Claude Code will not match there. See
+[authoring bundles](docs/authoring-bundles.md#subagents--subagentsnamemd).
+
+**The flag is recorded with the installation**, so `hcm update` reinstalls into
+the same place without being told again — say it once. Passing it to `hcm update`
+overrides what was recorded, which is how you migrate an existing install after
+adding the extension:
+
+```bash
+hcm update my-kit --pi-subagents    # moves the subagent, removing the old skill
+```
+
+`hcm install` accepts it too, but a plain install does not clean up: it writes
+the new location and leaves the old file behind, so it warns and points you at
+`hcm update`. The flag also works on `hcm info` (to preview the layout) and on
+`hcm import --install`.
+
+## Dependencies: bundles that build on other bundles
+
+One bundle explaining how your team's JIRA board works is worth writing once and
+requiring from the half-dozen bundles that assume it. A manifest says so:
+
+```yaml
+name: sprint-kit
+version: 1.0.0
+dependencies:
+  - jira-board@^1.2.0                # a name and a range
+  - team-conventions                 # any version will do
+  - name: db-kit                     # ...or the long form, with a source
+    version: ">=2.1 <3"
+    source: acme/agent-kits/db-kit
+```
+
+Installing `sprint-kit` installs `jira-board` first:
+
+```
+Resolved 1 required bundle(s):
+  sprint-kit v1.0.0
+  └─ jira-board v1.4.2  (registered)
+
+jira-board v1.4.2 (…/jira-board) (required by sprint-kit)
+  + .claude/skills/jira-board/SKILL.md
+  + .claude/agents/triager.md
+
+sprint-kit v1.0.0 (…/sprint-kit)
+  = .claude/skills/jira-board/SKILL.md  (already installed by another bundle -- shared, not copied again)
+  + .claude/agents/planner.md
+```
+
+**Where a dependency is looked for**, in order: bundles already in this run, the
+registry, a sibling folder in the same collection, and the `source` the
+dependency itself names. So a monorepo of bundles resolves with nothing
+registered and no network, and a published bundle can point at where its
+dependency lives. `hcm validate` tries the same lookup and tells you when it
+fails — which is the moment to add a `source`, since what resolves on your
+machine because you registered it resolves nowhere else.
+
+**Versions** are the usual subset: `1.2.3`, `^1.2.3`, `~1.2.3`, `>=1.2.3`,
+`1.2.x`, `*`, joined with a space for *and* and `||` for *or*. One version of a
+bundle exists per scope — there is only one `.claude/agents/` — so two
+dependents that cannot agree is an error naming both, not a silent choice:
+
+```
+✖ "jira-board" v1.4.2 does not satisfy ^2.0.0 (required by report-kit)
+Only one version of a bundle can be installed in a scope, and sprint-kit
+wants ^1.0.0, report-kit wants ^2.0.0.
+```
+
+Cycles are refused, naming the loop. A dependency goes only into the harnesses
+the bundles needing it went into, whatever else it happens to support.
+
+**Coming back out.** A bundle pulled in as a dependency is marked as such
+(`[dependency]` in `hcm list --installed`) and leaves when the last bundle
+needing it does:
+
+```bash
+hcm uninstall sprint-kit          # takes jira-board too, if nothing else needs it
+hcm uninstall sprint-kit --keep-orphans
+hcm uninstall jira-board          # refused: sprint-kit still requires it
+hcm uninstall jira-board --cascade            # …remove sprint-kit as well
+hcm uninstall jira-board --ignore-dependents  # …or leave it installed without it
+```
+
+Installing a dependency by name makes it yours: it is no longer automatic, and
+survives whatever pulled it in. `hcm install --no-deps` skips resolution
+entirely, and says what it skipped.
+
+`hcm update` installs dependencies a new version has gained, and leaves ones
+that are already there alone — updating one bundle should not quietly update
+another. Use `hcm update all` for that.
+
+## Shared items: written once, claimed by everyone who needs them
+
+Two bundles will often want the very same thing: a dependency's skill that its
+dependents also ship, an MCP server two kits both wrap, a permission both ask
+for. That is not a collision.
+
+**An item hcm has already installed, identical to what this bundle would write,
+is *shared*.** Nothing is written a second time — no second copy, not even a
+rewritten file — and the new installation claims it alongside the existing one.
+Uninstalling reports the item as `held` and leaves it:
+
+```
+  removed  .claude/agents/planner.md
+  held     .claude/skills/jira-board/SKILL.md (still required by jira-board)
+```
+
+The last claim to go takes the item with it. There is no counter to drift out of
+step: the claims *are* the install ledger, so what is holding an item is worked
+out from the same records `hcm list --installed` prints.
+
+This works item by item, so two bundles asking for one permission each plus one
+in common end up with three entries in the allow-list, and removing either
+leaves the other's two. It works across harnesses, since the claim is keyed by
+where the item actually is — which is what makes `.mcp.json` and `AGENTS.md`
+safe to share between Claude Code, OpenCode and Pi. And it works only for hcm's
+own claims: an entry *you* wrote is claimed by nobody, so it is adopted and
+outlives every bundle that happened to want it.
+
+Three outcomes, then, when something is already there:
+
+| What is there | Outcome | On uninstall |
+| --- | --- | --- |
+| Nothing | written | removed |
+| The same item, claimed by another bundle | **shared** — not written again | `held` until the last claimant goes |
+| The same item, claimed by nobody | **adopted** — not written, not owned | `kept`, always |
+| A different item | a conflict — you are asked | — |
 
 ## Context: sections that survive being overwritten
 
@@ -263,6 +416,10 @@ Consequences worth knowing:
 - **Items you already had are adopted, not claimed.** If a server, file or key
   is already exactly what the bundle would write, `hcm` records that the bundle
   uses it but does not take ownership — uninstall leaves it exactly where it is.
+- **Items another bundle installed are shared, not duplicated.** The same item
+  wanted by two bundles is written once and claimed by both; the last uninstall
+  is the one that removes it. See
+  [Shared items](#shared-items-written-once-claimed-by-everyone-who-needs-them).
 - **Everything else is asked about before writing.** See below.
 
 ## When something is already there
@@ -276,6 +433,11 @@ matches the bundle's byte for byte is left untouched: the file is not rewritten,
 not even reformatted, and the receipt records that the item was there first.
 `hcm status` counts it as adopted, `hcm uninstall` reports it as `kept` and
 leaves it behind, and a second bundle can adopt the same item without colliding.
+
+**Already installed by another bundle, identically → shared.** Same
+write-nothing outcome, different bookkeeping: this bundle claims the item too,
+and it survives until the last claimant is uninstalled. See
+[Shared items](#shared-items-written-once-claimed-by-everyone-who-needs-them).
 
 **Different → your call, one question per resource.** With a terminal attached,
 `hcm` asks. A skill is a dozen files but one question, because you mean one
@@ -327,12 +489,12 @@ hcm install my-kit --on-conflict prompt     # ask even where hcm would not have
 
 | Command | What it does |
 | --- | --- |
-| `hcm install <bundle>` | Install. `-t/--target`, `-s/--scope`, `--dry-run`, `--force`, `--on-conflict`, `--refresh` |
-| `hcm update <bundle>\|all` | Re-read a registered bundle and reinstall it. `-t`, `-s`, `--dry-run`, `--force`, `--on-conflict` |
-| `hcm uninstall <bundle>` | Remove exactly what was installed. `-t`, `-s`, `--dry-run`, `--force` |
+| `hcm install <bundle>` | Install, with whatever it requires. `-t/--target`, `-s/--scope`, `--dry-run`, `--force`, `--on-conflict`, `--refresh`, `--no-deps`, `--pi-subagents` |
+| `hcm update <bundle>\|all` | Re-read a registered bundle and reinstall it. `-t`, `-s`, `--dry-run`, `--force`, `--on-conflict`, `--pi-subagents` |
+| `hcm uninstall <bundle>` | Remove exactly what was installed. `-t`, `-s`, `--dry-run`, `--force`, `--cascade`, `--ignore-dependents`, `--keep-orphans` |
 | `hcm list` | Registered bundles (`●` = installed somewhere) |
 | `hcm list --installed` | Installed bundles. `--scope project\|user\|all`, `--json` |
-| `hcm info <bundle>` | Contents, plus where every item would land in each target |
+| `hcm info <bundle>` | Contents, plus where every item would land in each target. `--pi-subagents` |
 | `hcm status` | Verify installed items are still present and unmodified |
 | `hcm context [list]` | Tracked context sections, and whether each is still in its file. `--json` |
 | `hcm context append [bundle...]` | Add back the sections that have gone missing. `-t`, `-s`, `--dry-run`, `--force` |
@@ -610,7 +772,9 @@ non-zero.
 src/
 ├── cli.ts              # command wiring
 ├── commands/           # one file per command
-├── core/               # bundle loading, planning, executing, rollback, state,
+├── core/               # bundle loading, planning, executing, rollback, state
+│                       # state.ts -- receipts and the claims that refcount them
+│                       # deps.ts + semver.ts -- the dependency graph
 │                       # registry.ts + store.ts -- ids and the bundle snapshots
 │                       # context.ts -- the cached instruction sections
 ├── merge/              # json-merge.ts, blocks.ts, toml.ts -- the receipt machinery

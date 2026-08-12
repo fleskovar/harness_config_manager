@@ -10,11 +10,23 @@
  */
 
 import type { ConflictPolicy, Resolution } from '../core/conflicts.js';
+import {
+  type DependencyGraph,
+  installedDependencies,
+  resolveDependencyGraph,
+} from '../core/deps.js';
 import { color, log } from '../core/logger.js';
 import { readRegistry, refreshEntry, requireEntry } from '../core/registry.js';
-import { readState } from '../core/state.js';
-import type { InstallationRecord, LoadedBundle, RegistryEntry, Scope } from '../core/types.js';
-import { installInto, logTargetHeader } from './install.js';
+import { findInstallation, readState } from '../core/state.js';
+import type {
+  InstallationRecord,
+  InstalledDependency,
+  LoadedBundle,
+  RegistryEntry,
+  Scope,
+  TargetOptions,
+} from '../core/types.js';
+import { installBundle, installInto, logTargetHeader } from './install.js';
 import { rollbackInstallation } from './uninstall.js';
 
 export interface UpdateOptions {
@@ -25,6 +37,12 @@ export interface UpdateOptions {
   onConflict?: ConflictPolicy;
   /** Answers shared across every bundle and target this run touches. */
   decisions?: Map<string, Resolution>;
+  /**
+   * Overrides what each installation recorded. Given nothing, every one is
+   * reinstalled the way it was installed -- an update should put the new
+   * version where the old one was, not quietly relocate it.
+   */
+  targetOptions?: TargetOptions;
   cwd: string;
 }
 
@@ -89,9 +107,86 @@ async function updateOne(entry: RegistryEntry, options: UpdateOptions): Promise<
     return;
   }
 
+  // A new version can require something the old one did not. Those bundles are
+  // installed first, exactly as `hcm install` would have done, so the reinstall
+  // below lands on a complete set.
+  //
+  // A dependency that cannot be resolved is reported and the update carries on:
+  // `hcm update all` should not stop at the first bundle whose requirement has
+  // gone missing, and the installed copy is no worse for being refreshed.
+  let graph: DependencyGraph;
+  try {
+    graph = await resolveDependencyGraph([bundle], options.cwd, {});
+    await installNewDependencies(bundle, graph, records, options);
+  } catch (error) {
+    log.warn(`  ${(error as Error).message}`);
+    log.warn('  updating it anyway; run "hcm install" once the dependency is available');
+    graph = { order: [], byName: new Map(), hasDependencies: false };
+  }
+
   for (const record of records) {
     logTargetHeader(record.target, { scope: record.scope, cwd: options.cwd });
-    await reinstall(record, bundle, options);
+    await reinstall(record, bundle, graph, options);
+  }
+}
+
+/**
+ * Install the dependencies this bundle has gained, into the places it is
+ * already installed. Dependencies that are there stay as they are -- updating
+ * one bundle should not silently update another; `hcm update all` does that.
+ */
+async function installNewDependencies(
+  bundle: LoadedBundle,
+  graph: DependencyGraph,
+  records: InstallationRecord[],
+  options: UpdateOptions,
+): Promise<void> {
+  // Walked in graph order, so a dependency's own dependencies come first and
+  // a whole new subtree can arrive in one update.
+  for (const resolved of graph.order) {
+    const name = resolved.bundle.manifest.name;
+    if (name === bundle.manifest.name) continue;
+
+    const where = { scopes: new Set<Scope>(), targets: new Set<string>() };
+
+    for (const record of records) {
+      const installed = await findInstallation(record.scope, options.cwd, name, record.target);
+      if (installed) continue;
+      where.scopes.add(record.scope);
+      where.targets.add(record.target);
+    }
+
+    if (where.scopes.size === 0) continue;
+
+    log.info(
+      color.dim(
+        `  ${name} v${resolved.bundle.manifest.version} is now required and not installed here`,
+      ),
+    );
+
+    // Installed from the copy already resolved rather than by name: a
+    // dependency found beside its dependent, or at the source its manifest
+    // names, need never have been registered on this machine.
+    for (const scope of where.scopes) {
+      await installBundle(
+        resolved.bundle,
+        {
+          scope,
+          cwd: options.cwd,
+          targets: [...where.targets],
+          dryRun: options.dryRun ?? false,
+          force: options.force ?? false,
+          ...(options.onConflict ? { onConflict: options.onConflict } : {}),
+          ...(options.decisions ? { decisions: options.decisions } : {}),
+          ...(options.targetOptions ? { targetOptions: options.targetOptions } : {}),
+        },
+        {
+          auto: true,
+          dependencies: installedDependencies(resolved.bundle, graph),
+          requiredBy: resolved.requiredBy,
+        },
+      );
+    }
   }
 }
 
@@ -99,6 +194,7 @@ async function updateOne(entry: RegistryEntry, options: UpdateOptions): Promise<
 async function reinstall(
   record: InstallationRecord,
   bundle: LoadedBundle,
+  graph: DependencyGraph,
   options: UpdateOptions,
 ): Promise<void> {
   const rolledBack = await rollbackInstallation(record, {
@@ -115,14 +211,42 @@ async function reinstall(
     return;
   }
 
-  await installInto(bundle, record.target, {
-    scope: record.scope,
-    cwd: options.cwd,
-    dryRun: options.dryRun ?? false,
-    force: options.force ?? false,
-    ...(options.onConflict ? { onConflict: options.onConflict } : {}),
-    ...(options.decisions ? { decisions: options.decisions } : {}),
-  });
+  await installInto(
+    bundle,
+    record.target,
+    {
+      scope: record.scope,
+      cwd: options.cwd,
+      dryRun: options.dryRun ?? false,
+      force: options.force ?? false,
+      // What was recorded, unless this run says otherwise -- so `hcm update` puts
+      // the new version exactly where the old one was.
+      targetOptions: options.targetOptions ?? record.targetOptions ?? {},
+      ...(options.onConflict ? { onConflict: options.onConflict } : {}),
+      ...(options.decisions ? { decisions: options.decisions } : {}),
+    },
+    {
+      // An update does not change why a bundle is here, only what it holds.
+      ...(record.auto ? { auto: true } : {}),
+      dependencies: resolvedDependencies(record, bundle, graph),
+    },
+  );
+}
+
+/**
+ * What to record as this installation's dependencies. Normally the versions
+ * just resolved -- but if resolution failed we keep what was recorded before,
+ * rather than writing an empty list that would let `hcm uninstall` take away a
+ * bundle something still needs.
+ */
+function resolvedDependencies(
+  record: InstallationRecord,
+  bundle: LoadedBundle,
+  graph: DependencyGraph,
+): InstalledDependency[] {
+  const resolved = installedDependencies(bundle, graph);
+  if (resolved.length > 0 || bundle.dependencies.length === 0) return resolved;
+  return record.dependencies ?? [];
 }
 
 /** Every installation of a bundle, filtered by the requested scopes and targets. */

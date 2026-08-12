@@ -33,9 +33,11 @@ export async function applyPlan(plan: InstallPlan): Promise<Receipt[]> {
         if (action.payload.kind !== 'file') continue;
         const { contents } = action.payload;
 
-        // An adopted file is already byte-identical, so writing it would only
-        // change its mtime -- and the receipt must say we do not own it.
-        if (!action.adopt) {
+        // Adopted and shared files are already byte-identical, so writing would
+        // only change the mtime. The difference is in the receipt: an adopted
+        // file is not ours to remove, a shared one is ours jointly with
+        // whoever else claims it.
+        if (!action.adopt && !action.share) {
           if (typeof contents === 'string') await writeText(absolutePath, contents);
           else await writeBytes(absolutePath, contents);
         }
@@ -106,14 +108,16 @@ async function applyJson(
 
       // Adopting: the key already holds exactly this value, so leave the
       // document (and its formatting) untouched and record it as not ours.
-      if (action.adopt) {
+      // Sharing is the same write-nothing case, but the value *was* put there
+      // by another installation, so this one claims it too.
+      if (action.adopt || action.share) {
         receipts.push({
           op: 'json-value',
           path: relativePath,
           pointer,
           hash: hashValue(value),
           hadPrevious: false,
-          preexisting: true,
+          ...(action.adopt ? { preexisting: true } : {}),
         });
         continue;
       }
@@ -140,12 +144,21 @@ async function applyJson(
       const { pointer, items } = action.payload;
       const result = appendArrayItems(doc, pointer, items);
       if (result.appended.length > 0) changed = true;
+
+      // Items we appended are ours. Items already in the list are ours too when
+      // another installation put them there -- two bundles allowing the same
+      // permission both claim it, and it survives until the second one goes.
+      // An entry the *user* wrote is claimed by nobody and stays untouched.
+      const hashes = new Set([
+        ...result.appended.map((item) => hashValue(item)),
+        ...(action.shareItems ?? []),
+      ]);
+
       receipts.push({
         op: 'json-array-item',
         path: relativePath,
         pointer,
-        // Only items we actually appended are ours to remove later.
-        hashes: result.appended.map((item) => hashValue(item)),
+        hashes: [...hashes],
       });
     }
   }

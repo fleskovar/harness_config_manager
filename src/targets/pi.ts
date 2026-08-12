@@ -5,6 +5,7 @@ import {
   appliesToPrefix,
   assetFile,
   instructionBlock,
+  joinTools,
   markdownFile,
   settingsActions,
   skillFiles,
@@ -19,7 +20,8 @@ import type { Target, TargetContext } from './types.js';
  *
  *   .pi/skills/<name>/**      AGENTS.md         -> marker block (context, rules)
  *   .pi/prompts/<name>.md     .pi/settings.json
- *                             .mcp.json         -> mcpServers.<name>
+ *   .pi/agents/<name>.md      .mcp.json         -> mcpServers.<name>
+ *     (subagents, with --pi-subagents)
  *
  * User scope is ~/.pi/agent, which mirrors the project layout without the `.pi`
  * prefix -- and holds the global `AGENTS.md`, `skills/` and `prompts/`.
@@ -32,6 +34,12 @@ import type { Target, TargetContext } from './types.js';
  *    invokes it by name. Pi has no profile-level tool allowlist or model
  *    override to carry, so `tools` and `model` are dropped; and with no
  *    delegation the prompt runs in the main context rather than its own.
+ *
+ *    Unless `pi-subagents` is installed, that is: with `--pi-subagents` the
+ *    subagent is written to `.pi/agents/<name>.md` instead, which is the
+ *    directory that extension scans, and `tools` and `model` survive because
+ *    it has fields for them. Delegation is real there -- `subagent({ agent })`
+ *    spawns a child session. https://github.com/nicobailon/pi-subagents
  *  - MCP servers go to the same `.mcp.json`, in the same `mcpServers` shape,
  *    that every other harness uses -- which is the convention Pi's MCP
  *    extensions read. Inert until one is installed, correct once it is.
@@ -44,6 +52,10 @@ export const pi: Target = {
   title: 'Pi',
   docs: 'https://pi.dev/docs/latest/quickstart',
   supports: ['subagent', 'skill', 'command', 'rule', 'context', 'mcp', 'settings', 'asset'],
+  notes: [
+    'subagents install as skills; pass --pi-subagents if the pi-subagents',
+    'extension is installed and they will go to agents/ instead',
+  ],
 
   scopeRoot(scope: Scope, cwd: string): string {
     return scope === 'user' ? piHome() : cwd;
@@ -54,17 +66,29 @@ export const pi: Target = {
     const base = ctx.scope === 'user' ? '' : '.pi/';
 
     switch (resource.kind) {
-      // There is no agents directory: a subagent is filed as a skill, sharing
-      // the directory and the file format. Pi follows the Agent Skills standard
-      // (docs/skills.md), whose frontmatter is just `name` and `description` --
-      // so nothing else from the subagent's frontmatter has a home here.
+      // Stock Pi has no agents directory: a subagent is filed as a skill,
+      // sharing the directory and the file format. Pi follows the Agent Skills
+      // standard (docs/skills.md), whose frontmatter is just `name` and
+      // `description` -- so nothing else from the subagent's frontmatter has a
+      // home here. With `pi-subagents` installed there is somewhere better.
       case 'subagent':
-        return [
-          markdownFile(`${base}skills/${resource.name}/SKILL.md`, resource, {
-            name: resource.name,
-            description: resource.frontmatter.description,
-          }),
-        ];
+        return ctx.options.piSubagents
+          ? [
+              markdownFile(`${base}agents/${resource.name}.md`, resource, {
+                name: resource.name,
+                description: resource.frontmatter.description,
+                // The extension takes a comma-separated list or a YAML block
+                // list; the comma form matches what Claude Code is given.
+                tools: joinTools(resource.frontmatter.tools),
+                model: resource.frontmatter.model,
+              }),
+            ]
+          : [
+              markdownFile(`${base}skills/${resource.name}/SKILL.md`, resource, {
+                name: resource.name,
+                description: resource.frontmatter.description,
+              }),
+            ];
 
       case 'skill':
         return skillFiles(resource, `${base}skills/${resource.name}`);

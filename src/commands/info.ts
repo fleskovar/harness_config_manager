@@ -1,13 +1,16 @@
 import { validateBundle } from '../core/bundle.js';
+import { formatDependencyTree, resolveDependencyGraph } from '../core/deps.js';
 import { describeSource } from '../core/github.js';
 import { color, log } from '../core/logger.js';
 import { buildPlan } from '../core/planner.js';
 import { readRegistry, resolveBundles } from '../core/registry.js';
-import type { LoadedBundle, ResourceKind, Scope } from '../core/types.js';
+import type { LoadedBundle, ResourceKind, Scope, TargetOptions } from '../core/types.js';
 import { TARGET_IDS, getTarget } from '../targets/index.js';
 
 export interface InfoOptions {
   scope: Scope;
+  /** Preview the layout for a machine with these extensions installed. */
+  targetOptions?: TargetOptions;
   cwd: string;
 }
 
@@ -37,6 +40,8 @@ async function describeBundle(
   if (manifest.author) log.plain(color.dim(`author: ${manifest.author}`));
   if (manifest.tags?.length) log.plain(color.dim(`tags: ${manifest.tags.join(', ')}`));
 
+  await describeDependencies(bundle, options);
+
   const byKind = new Map<ResourceKind, string[]>();
   for (const resource of bundle.resources) {
     const list = byKind.get(resource.kind) ?? [];
@@ -54,7 +59,13 @@ async function describeBundle(
 
   for (const targetId of targets) {
     const target = getTarget(targetId);
-    const plan = await buildPlan(bundle, targetId, options.scope, options.cwd);
+    const plan = await buildPlan(
+      bundle,
+      targetId,
+      options.scope,
+      options.cwd,
+      options.targetOptions ?? {},
+    );
 
     log.plain(color.bold(`\n${target.title}`) + color.dim(` · ${options.scope}`));
     for (const action of plan.actions) log.plain(`  ${action.describe}`);
@@ -72,5 +83,29 @@ async function describeBundle(
   if (problems.length > 0) {
     log.plain(color.bold('\nWarnings'));
     for (const problem of problems) log.plain(color.yellow(`  ${problem}`));
+  }
+}
+
+/**
+ * What this bundle needs, and whether hcm can find it. Resolution is attempted
+ * rather than assumed: a dependency that cannot be located is the thing you
+ * most want `hcm info` to tell you, and it costs nothing to look.
+ */
+async function describeDependencies(bundle: LoadedBundle, options: InfoOptions): Promise<void> {
+  if (bundle.dependencies.length === 0) return;
+
+  log.plain(color.bold('\nRequires'));
+
+  try {
+    const graph = await resolveDependencyGraph([bundle], options.cwd);
+    for (const line of formatDependencyTree(graph, [bundle.manifest.name]).slice(1)) {
+      log.plain(`  ${line}`);
+    }
+  } catch (error) {
+    for (const dependency of bundle.dependencies) {
+      const range = dependency.version ? ` ${dependency.version}` : '';
+      log.plain(`  ${dependency.name}${color.dim(range)}`);
+    }
+    log.plain(color.yellow(`  ! ${(error as Error).message}`));
   }
 }
