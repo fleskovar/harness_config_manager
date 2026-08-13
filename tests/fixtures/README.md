@@ -25,6 +25,24 @@ like: `git checkout` puts them back.
 | `projects/adopted-setup` | `conflicts-fixtures` | A project that already has exactly the server review-kit would write |
 | `projects/agent-rewritten` | `context-fixtures` | `CLAUDE.md` as a coding agent leaves it after rewriting the file |
 
+## The per-harness fixtures next door
+
+The five `tests/target-<harness>/` folders work the same way but keep their
+fixtures to themselves: each holds `input/sample-kit` (the same bundle in all
+five, one resource of every kind), `expected/` (the whole tree that bundle has
+to produce in that harness), and the test that installs one and compares it
+against the other. Nothing is shared between them, so a folder can be read —
+or diffed against its neighbour — on its own:
+
+```bash
+diff -r tests/target-claude-code/expected tests/target-pi/expected
+```
+
+Every difference that prints is something the two harnesses genuinely disagree
+about, and the "Where things land" table in the top-level README says what.
+Changing the sample bundle means changing it in all five and regenerating each
+`expected/`, which is the price of each folder standing alone.
+
 ## Solving the reference one by hand
 
 ```bash

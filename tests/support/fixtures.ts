@@ -33,8 +33,20 @@ export function fixturePath(relative: string): string {
  * asset a test can damage is an asset nobody can trust.
  */
 export async function copyFixture(relative: string, destination: string): Promise<string> {
-  await copyDir(fixturePath(relative), destination);
+  await copyDirectory(fixturePath(relative), destination);
   return destination;
+}
+
+/**
+ * Copy any directory, not just one under `tests/fixtures`.
+ *
+ * The per-target tests keep their bundle beside themselves, in
+ * `tests/target-<harness>/input`, so they address it by path rather than by
+ * fixture name.
+ */
+export async function copyDirectory(from: string, to: string): Promise<string> {
+  await copyDir(from, to);
+  return to;
 }
 
 async function copyDir(from: string, to: string): Promise<void> {
@@ -105,4 +117,26 @@ export async function listTree(root: string, options: { includeState?: boolean }
 
   await walk(root);
   return found.sort();
+}
+
+/**
+ * Every file under `root` as POSIX path -> text.
+ *
+ * This is `listTree` with the contents attached, which is what a whole-tree
+ * comparison needs: one `expect(actual).toEqual(expected)` covers the file list
+ * and every byte inside it, and the diff on failure names the file and the line.
+ *
+ * Line endings are normalised on both sides. `hcm` writes `\n`, but a checkout
+ * with `core.autocrlf=true` hands the expected tree back as `\r\n` -- and that
+ * is git's business, not something a target adapter should be judged on.
+ */
+export async function readTree(
+  root: string,
+  options: { includeState?: boolean } = {},
+): Promise<Record<string, string>> {
+  const tree: Record<string, string> = {};
+  for (const relative of await listTree(root, options)) {
+    tree[relative] = (await readText(root, relative)).replace(/\r\n/g, '\n');
+  }
+  return tree;
 }

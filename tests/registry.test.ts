@@ -405,6 +405,153 @@ describe('hcm update', () => {
     );
   });
 
+  describe('with no argument', () => {
+    /** A second bundle, since two cannot both own `reviewer`. */
+    const makeBeta = async (body: string): Promise<string> => {
+      const dir = await makeBundle('beta', { body });
+      await fs.rename(
+        path.join(dir, 'subagents', 'reviewer.md'),
+        path.join(dir, 'subagents', 'auditor.md'),
+      );
+      return dir;
+    };
+
+    it('updates every bundle installed here', async () => {
+      const alpha = await makeBundle('alpha', { body: 'Alpha one.' });
+      const beta = await makeBeta('Beta one.');
+      await addToRegistry(alpha, workspace);
+      await addToRegistry(beta, workspace);
+      await install('alpha');
+      await install('beta');
+
+      await fs.writeFile(
+        path.join(alpha, 'subagents', 'reviewer.md'),
+        '---\ndescription: Reviews code\n---\n\nAlpha two.\n',
+      );
+      await fs.writeFile(
+        path.join(beta, 'subagents', 'auditor.md'),
+        '---\ndescription: Audits code\n---\n\nBeta two.\n',
+      );
+
+      await updateCommand(undefined, { cwd: projectDir });
+
+      expect(await readIfExists(agentFile('reviewer'))).toContain('Alpha two.');
+      expect(await readIfExists(agentFile('auditor'))).toContain('Beta two.');
+    });
+
+    it('leaves a registered bundle that is not installed here alone', async () => {
+      // The whole difference from "all": refreshing a bundle nobody installed
+      // costs a fetch and changes nothing here.
+      const alpha = await makeBundle('alpha', { version: '1.0.0' });
+      const beta = await makeBeta('Beta one.');
+      await addToRegistry(alpha, workspace);
+      await addToRegistry(beta, workspace);
+      await install('alpha');
+
+      await fs.writeFile(
+        path.join(alpha, 'hcm.yaml'),
+        'name: alpha\nversion: 2.0.0\ndescription: test bundle\n',
+      );
+      await fs.writeFile(
+        path.join(beta, 'hcm.yaml'),
+        'name: beta\nversion: 2.0.0\ndescription: test bundle\n',
+      );
+
+      await updateCommand(undefined, { cwd: projectDir });
+
+      const versions = new Map(
+        (await readRegistry()).entries.map((entry) => [entry.name, entry.version]),
+      );
+      expect(versions.get('alpha')).toBe('2.0.0');
+      expect(versions.get('beta')).toBe('1.0.0');
+    });
+
+    it('still updates "all", including what is not installed', async () => {
+      const beta = await makeBeta('Beta one.');
+      await addToRegistry(beta, workspace);
+
+      await fs.writeFile(
+        path.join(beta, 'hcm.yaml'),
+        'name: beta\nversion: 2.0.0\ndescription: test bundle\n',
+      );
+      await updateCommand('all', { cwd: projectDir });
+
+      expect((await readRegistry()).entries[0]?.version).toBe('2.0.0');
+    });
+
+    it('honours --scope when deciding what is installed', async () => {
+      const alpha = await makeBundle('alpha', { version: '1.0.0' });
+      const beta = await makeBeta('Beta one.');
+      await addToRegistry(alpha, workspace);
+      await addToRegistry(beta, workspace);
+      await install('alpha');
+      await installCommand('beta', {
+        scope: 'user',
+        targets: ['claude-code'],
+        cwd: projectDir,
+      });
+
+      await fs.writeFile(
+        path.join(alpha, 'hcm.yaml'),
+        'name: alpha\nversion: 2.0.0\ndescription: test bundle\n',
+      );
+      await fs.writeFile(
+        path.join(beta, 'hcm.yaml'),
+        'name: beta\nversion: 2.0.0\ndescription: test bundle\n',
+      );
+
+      await updateCommand(undefined, { scope: 'project', cwd: projectDir });
+
+      const versions = new Map(
+        (await readRegistry()).entries.map((entry) => [entry.name, entry.version]),
+      );
+      expect(versions.get('alpha')).toBe('2.0.0');
+      expect(versions.get('beta')).toBe('1.0.0');
+    });
+
+    it('finds an installation recorded under an aliased entry’s manifest name', async () => {
+      const origin = await makeBundle('alpha', { body: 'Version one.' });
+      await addToRegistry(origin, workspace, { name: 'my-alias' });
+      await install('my-alias');
+
+      await fs.writeFile(
+        path.join(origin, 'subagents', 'reviewer.md'),
+        '---\ndescription: Reviews code\n---\n\nVersion two.\n',
+      );
+
+      await updateCommand(undefined, { cwd: projectDir });
+
+      expect(await readIfExists(agentFile('reviewer'))).toContain('Version two.');
+    });
+
+    it('says so, rather than failing, when nothing is installed', async () => {
+      await addToRegistry(await makeBundle('alpha'), workspace);
+
+      await expect(updateCommand(undefined, { cwd: projectDir })).resolves.toBeUndefined();
+      expect((await readRegistry()).entries[0]?.version).toBe('1.0.0');
+    });
+
+    it('carries on when something installed here was never registered', async () => {
+      const alpha = await makeBundle('alpha', { body: 'Alpha one.' });
+      const beta = await makeBeta('Beta one.');
+      await addToRegistry(alpha, workspace);
+      await install('alpha');
+      // Installed straight from a path, so the ledger holds a name the
+      // registry has never heard of.
+      await installCommand(beta, { scope: 'project', targets: ['claude-code'], cwd: projectDir });
+
+      await fs.writeFile(
+        path.join(alpha, 'subagents', 'reviewer.md'),
+        '---\ndescription: Reviews code\n---\n\nAlpha two.\n',
+      );
+
+      await updateCommand(undefined, { cwd: projectDir });
+
+      expect(await readIfExists(agentFile('reviewer'))).toContain('Alpha two.');
+      expect(await readIfExists(agentFile('auditor'))).toContain('Beta one.');
+    });
+  });
+
   it('picks up edits to a dev bundle without touching a store', async () => {
     const origin = await makeBundle('alpha', { body: 'Version one.' });
     await addToRegistry(origin, workspace, { dev: true });

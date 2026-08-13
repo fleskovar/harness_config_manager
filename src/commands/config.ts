@@ -1,10 +1,12 @@
 import {
   assertConfigKey,
+  assertRequireTargetPolicy,
   CONFIG_KEYS,
   configFile,
   describeSetting,
   expandPath,
   type HcmConfig,
+  isPathSetting,
   readConfig,
   writeConfig,
 } from '../core/config.js';
@@ -39,10 +41,18 @@ export async function configGetCommand(key: string): Promise<void> {
 export async function configSetCommand(key: string, value: string): Promise<void> {
   assertConfigKey(key);
   const config = await readConfig();
-  config[key] = value;
+
+  // A directory setting is stored as written and expanded on use; a word is
+  // checked here, since a typo would otherwise only surface on the next install.
+  if (key === 'requireTarget') {
+    assertRequireTargetPolicy(value);
+    config.requireTarget = value;
+  } else {
+    config[key] = value;
+  }
   await writeConfig(config);
 
-  log.success(`Set ${key} = ${expandPath(value)}`);
+  log.success(`Set ${key} = ${isPathSetting(key) ? expandPath(value) : value}`);
   if (key === 'cacheDir') {
     log.info(
       color.dim('Existing downloads stay where they were; they will be re-fetched as needed.'),

@@ -27,6 +27,22 @@ export const copilot: Target = {
     return scope === 'user' ? path.join(os.homedir(), '.copilot') : cwd;
   },
 
+  // `.github` on its own means nothing -- every repository has one -- so the
+  // markers are the directories inside it that only Copilot reads.
+  markers(scope: Scope): string[] {
+    return scope === 'user'
+      ? ['.']
+      : [
+          '.github/agents',
+          '.github/prompts',
+          '.github/instructions',
+          '.github/skills',
+          '.github/copilot',
+          '.github/copilot-instructions.md',
+          '.vscode/mcp.json',
+        ];
+  },
+
   actions(resource: BundleResource, ctx: TargetContext): PlanAction[] {
     // At user scope the root is already ~/.copilot, so we drop the .github prefix.
     const base = ctx.scope === 'user' ? '' : '.github/';

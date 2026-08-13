@@ -16,9 +16,11 @@
 
 import { forgetContext } from '../core/context.js';
 import { HcmError } from '../core/errors.js';
+import { detectHarnesses, expandTargets, requireTargetChoice } from '../core/harnesses.js';
 import { color, log } from '../core/logger.js';
-import { resolveInstalledName } from '../core/registry.js';
-import { rollback, type RemovalStatus } from '../core/rollback.js';
+import { describeReaders, sharedFileNotices } from '../core/overlap.js';
+import { asList, resolveInstalledName } from '../core/registry.js';
+import { rollback, type RemovalResult, type RemovalStatus } from '../core/rollback.js';
 import {
   collectClaims,
   findDependents,
@@ -26,7 +28,12 @@ import {
   findInstallations,
   removeInstallation,
 } from '../core/state.js';
-import { describeReceipt, type InstallationRecord, type Scope } from '../core/types.js';
+import {
+  describeReceipt,
+  type InstallationRecord,
+  type Scope,
+  type TargetId,
+} from '../core/types.js';
 import { getTarget } from '../targets/index.js';
 
 export interface UninstallOptions {
@@ -40,6 +47,8 @@ export interface UninstallOptions {
   ignoreDependents?: boolean;
   /** Keep dependencies that were pulled in automatically and are now unused. */
   keepOrphans?: boolean;
+  /** Harnesses set up in this folder; see `core/harnesses.ts`. Detected when absent. */
+  presentTargets?: TargetId[];
   cwd: string;
 }
 
@@ -53,22 +62,59 @@ const STATUS_STYLE: Record<RemovalStatus, (text: string) => string> = {
   held: color.cyan,
 };
 
-export async function uninstallCommand(reference: string, options: UninstallOptions): Promise<void> {
-  // Accepts a registry id as well as a name; an unregistered bundle can still
-  // be installed, so anything unrecognised is taken as a name.
-  const bundleName = await resolveInstalledName(reference);
-  const records = await findInstallations(options.scope, options.cwd, bundleName);
+/**
+ * Uninstall one bundle, or several.
+ *
+ * Several at once is not the same as several commands. The removals are worked
+ * out together, so a bundle that depends on another one being removed in the
+ * same breath is not a reason to stop, and an item both of them claim comes out
+ * once the last of them has gone -- rather than being held by a claim that this
+ * very command is about to drop.
+ */
+export async function uninstallCommand(
+  references: string | string[],
+  options: UninstallOptions,
+): Promise<void> {
+  const wanted = asList(references);
+  const chosen = expandTargets(options.targets);
 
-  const selected = options.targets?.length
-    ? records.filter((record) => options.targets?.includes(record.target))
-    : records;
+  // Every name is resolved before anything is removed: a typo in the third of
+  // three should not leave the first two uninstalled.
+  const selected: InstallationRecord[] = [];
+  const bundleNames = new Set<string>();
 
-  if (selected.length === 0) {
-    throw new HcmError(
-      `"${bundleName}" is not installed in ${options.scope} scope`,
-      'Run "hcm list --installed" to see what is installed.',
-    );
+  for (const reference of wanted) {
+    // Accepts a registry id as well as a name; an unregistered bundle can still
+    // be installed, so anything unrecognised is taken as a name.
+    const bundleName = await resolveInstalledName(reference);
+    const records = await findInstallations(options.scope, options.cwd, bundleName);
+    const matching = chosen ? records.filter((record) => chosen.includes(record.target)) : records;
+
+    if (matching.length === 0) {
+      throw new HcmError(
+        `"${bundleName}" is not installed in ${options.scope} scope` +
+          (chosen ? ` in ${chosen.join(', ')}` : ''),
+        'Run "hcm list --installed" to see what is installed.',
+      );
+    }
+
+    bundleNames.add(bundleName);
+    for (const record of matching) {
+      if (!selected.some((existing) => existing.id === record.id)) selected.push(record);
+    }
   }
+
+  // Only ambiguous if it is actually installed into several harnesses: a bundle
+  // that only ever went into one needs no `-t`, however many harnesses the
+  // folder holds.
+  const found = await requireTargetChoice({
+    ...(chosen ? { chosen } : {}),
+    affected: [...new Set(selected.map((record) => record.target))],
+    command: `hcm uninstall ${wanted.join(' ')}`,
+    scope: options.scope,
+    cwd: options.cwd,
+  });
+  const presentTargets = found.map((harness) => harness.target);
 
   const removing = await withDependents(selected, options);
   const pendingIds = removing.map((record) => record.id);
@@ -79,19 +125,22 @@ export async function uninstallCommand(reference: string, options: UninstallOpti
 
     // Named bundles get the plain header; anything --cascade dragged in says
     // whose account it is being removed on.
-    const cascaded =
-      record.bundle === bundleName
-        ? ''
-        : ` ${color.bold(record.bundle)}${color.dim(' (depends on it)')}`;
+    const cascaded = bundleNames.has(record.bundle)
+      ? ''
+      : ` ${color.bold(record.bundle)}${color.dim(' (depends on it)')}`;
 
     log.info('');
     log.info(`${color.bold(target.title)} ${color.dim(`· ${record.scope} · ${scopeRoot}`)}${cascaded}`);
 
-    const removed = await rollbackInstallation(record, { ...options, alsoRemoving: pendingIds });
+    const removed = await rollbackInstallation(record, {
+      ...options,
+      alsoRemoving: pendingIds,
+      presentTargets,
+    });
     if (removed) log.success(`  uninstalled ${record.bundle} from ${target.title}`);
   }
 
-  if (!options.keepOrphans) await pruneOrphans(removing, options);
+  if (!options.keepOrphans) await pruneOrphans(removing, { ...options, presentTargets });
 }
 
 /**
@@ -203,6 +252,8 @@ export async function rollbackInstallation(
     force?: boolean;
     /** Other installations going away in the same run; their claims do not count. */
     alsoRemoving?: string[];
+    /** Harnesses set up in this folder; see `core/harnesses.ts`. Detected when absent. */
+    presentTargets?: TargetId[];
   },
 ): Promise<boolean> {
   const target = getTarget(record.target);
@@ -224,6 +275,8 @@ export async function rollbackInstallation(
     log.info(`  ${style(pad(result.status))} ${describeReceipt(result.receipt)}${detail}`);
   }
 
+  await reportSharedFiles(record, results, options);
+
   const blocked = results.filter((result) => result.status === 'modified');
 
   if (options.dryRun) {
@@ -244,6 +297,62 @@ export async function rollbackInstallation(
   // put back instructions from a bundle that is no longer installed.
   await forgetContext(record.bundle, record.target, record.scope, options.cwd);
   return true;
+}
+
+/**
+ * Say what removing from one harness did to the others.
+ *
+ * `-t reasonix` reads as "only Reasonix", and for `.reasonix/` it is. For a
+ * file two harnesses read it cannot be, and it goes wrong in both directions:
+ *
+ *   held     another installation still claims the item, so it stays in the
+ *            file -- and the harness you removed it from goes on reading that
+ *            same file, so it still has it. This is the one that surprises
+ *            people: `hcm uninstall -t reasonix` reports success and Reasonix
+ *            still has the MCP server, because Claude Code's claim kept the
+ *            entry in `.mcp.json`.
+ *   removed  nothing else claimed it, so it is gone from the file -- including
+ *            for the harnesses that were not named.
+ */
+async function reportSharedFiles(
+  record: InstallationRecord,
+  results: RemovalResult[],
+  options: { cwd: string; presentTargets?: TargetId[] },
+): Promise<void> {
+  const present =
+    options.presentTargets ??
+    (await detectHarnesses(record.scope, options.cwd)).map((harness) => harness.target);
+
+  const notices = sharedFileNotices({
+    target: record.target,
+    paths: results.map((result) => result.receipt.path),
+    scope: record.scope,
+    cwd: options.cwd,
+    present,
+    ...(record.targetOptions ? { options: record.targetOptions } : {}),
+  });
+
+  for (const notice of notices) {
+    const touched = results.filter((result) => result.receipt.path === notice.path);
+    const held = touched.filter((result) => result.status === 'held').length;
+    const gone = touched.filter(
+      (result) => result.status === 'removed' || result.status === 'partial',
+    ).length;
+    const readers = describeReaders(notice.others);
+
+    if (held > 0) {
+      log.warn(
+        `  ${notice.path} is shared with ${readers}: ${held} item(s) were left in place, ` +
+          `so ${getTarget(record.target).title} still reads them from this file`,
+      );
+    }
+    if (gone > 0) {
+      log.warn(
+        `  ${notice.path} is shared with ${readers}: ${gone} item(s) were removed from it, ` +
+          `so ${readers} lost them too`,
+      );
+    }
+  }
 }
 
 /**
@@ -306,7 +415,11 @@ async function pruneOrphans(
     log.info(
       `${color.bold(target.title)} ${color.dim(`· ${orphan.scope}`)} ${color.bold(orphan.bundle)}`,
     );
-    const done = await rollbackInstallation(orphan, { ...options, alsoRemoving: pendingIds });
+    const done = await rollbackInstallation(orphan, {
+      ...options,
+      alsoRemoving: pendingIds,
+      ...(options.presentTargets ? { presentTargets: options.presentTargets } : {}),
+    });
     if (done) log.success(`  uninstalled ${orphan.bundle} from ${target.title}`);
   }
 }

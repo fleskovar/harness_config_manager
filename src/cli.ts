@@ -33,6 +33,7 @@ import { updateCommand } from './commands/update.js';
 import { validateCommand } from './commands/validate.js';
 import type { ConflictPolicy } from './core/conflicts.js';
 import { ConflictError, HcmError } from './core/errors.js';
+import { ALL_TARGETS } from './core/harnesses.js';
 import { color, configureLogger, log } from './core/logger.js';
 import { closePrompt } from './core/prompt.js';
 import type { Scope, TargetOptions } from './core/types.js';
@@ -53,13 +54,45 @@ program
   .hook('preAction', (thisCommand) => {
     const options = thisCommand.opts<{ quiet?: boolean; verbose?: boolean }>();
     configureLogger({ quiet: options.quiet ?? false, verbose: options.verbose ?? false });
+  })
+  /**
+   * `--target` is variadic, so `hcm install --target pi 1 2` hands `1` and `2`
+   * to the option and leaves the command with no bundle at all. Commander then
+   * says "missing required argument", which is true and no help whatsoever --
+   * so when the command line has a `-t` in it, say what actually happened.
+   *
+   * Set before any subcommand is defined, since each one copies the output
+   * configuration from its parent as it is created.
+   */
+  .configureOutput({
+    writeErr(str: string) {
+      process.stderr.write(str);
+      if (!/missing required argument/.test(str)) return;
+      if (!process.argv.slice(2).some((arg) => arg === '-t' || arg === '--target')) return;
+      process.stderr.write(
+        '--target takes every value after it, so bundle names must come first: ' +
+          'hcm <command> <bundle...> --target <harness...>\n',
+      );
+    },
   });
 
 const scopeOption = () =>
   new Option('-s, --scope <scope>', 'install scope').choices(['project', 'user']).default('project');
 
+/**
+ * Which harnesses a command acts on -- one, several, or `all`.
+ *
+ * Variadic, so `-t claude pi` is two harnesses in one flag, and each value is
+ * an id, an alias or any unambiguous prefix of one. Deliberately not
+ * `.choices()`: that would reject the shorthands, and it reports a bad value
+ * without the hint about `--target` swallowing bundle names that follow it.
+ * `core/harnesses.ts` validates instead.
+ */
 const targetOption = () =>
-  new Option('-t, --target <target...>', 'target harness(es)').choices(TARGET_IDS);
+  new Option(
+    '-t, --target <target...>',
+    `target harness(es): ${TARGET_IDS.join(', ')}, or "${ALL_TARGETS}"`,
+  );
 
 /**
  * Without this, a conflict asks -- when there is a terminal to ask at, and
@@ -87,8 +120,11 @@ const targetOptionsFrom = (options: { piSubagents?: boolean }): TargetOptions =>
 
 program
   .command('install')
-  .argument('<bundle>', 'registered name, local path, GitHub URL, or owner/repo[/subdir][#ref]')
-  .description('install a bundle into one or more harnesses')
+  .argument(
+    '<bundle...>',
+    'one or more: registered name or id, local path, GitHub URL, or owner/repo[/subdir][#ref]',
+  )
+  .description('install one or more bundles into one or more harnesses')
   .addOption(targetOption())
   .addOption(scopeOption())
   .addOption(conflictOption())
@@ -97,8 +133,8 @@ program
   .option('--refresh', 're-download a GitHub bundle instead of using the cache')
   .option('--no-deps', 'install only this bundle, not the ones it requires')
   .addOption(piSubagentsOption())
-  .action(async (bundle, options) => {
-    await installCommand(bundle, {
+  .action(async (bundles, options) => {
+    await installCommand(bundles, {
       targets: options.target,
       scope: options.scope as Scope,
       dryRun: options.dryRun,
@@ -115,17 +151,17 @@ program
 program
   .command('uninstall')
   .alias('remove')
-  .argument('<bundle>', 'installed bundle name')
-  .description('remove exactly the items a bundle installed')
+  .argument('<bundle...>', 'installed bundle name(s) or id(s)')
+  .description('remove exactly the items one or more bundles installed')
   .addOption(targetOption())
   .addOption(scopeOption())
   .option('--dry-run', 'show what would be removed without writing')
   .option('--force', 'remove items even if they were edited since install')
-  .option('--cascade', 'also remove the bundles that depend on this one')
-  .option('--ignore-dependents', 'remove it even though other bundles still require it')
+  .option('--cascade', 'also remove the bundles that depend on these')
+  .option('--ignore-dependents', 'remove them even though other bundles still require them')
   .option('--keep-orphans', 'keep bundles that were installed only as dependencies')
-  .action(async (bundle, options) => {
-    await uninstallCommand(bundle, {
+  .action(async (bundles, options) => {
+    await uninstallCommand(bundles, {
       targets: options.target,
       scope: options.scope as Scope,
       dryRun: options.dryRun,
@@ -139,8 +175,11 @@ program
 
 program
   .command('update')
-  .argument('<bundle>', 'registered name or id, or "all"')
-  .description('re-read a registered bundle and reinstall it wherever it is installed')
+  .argument(
+    '[bundle...]',
+    'registered name(s) or id(s), or "all" for every registered bundle; omit for every bundle installed here',
+  )
+  .description('re-read bundles and reinstall them in place (default: everything installed here)')
   .addOption(targetOption())
   .addOption(
     new Option('-s, --scope <scope>', 'scopes to update').choices(['project', 'user', 'all']),
@@ -151,8 +190,8 @@ program
   // Omitted, each installation keeps what it recorded; passing it switches
   // every installation this run touches over.
   .addOption(piSubagentsOption())
-  .action(async (bundle, options) => {
-    await updateCommand(bundle, {
+  .action(async (bundles, options) => {
+    await updateCommand(bundles, {
       targets: options.target,
       scope: options.scope as Scope | 'all' | undefined,
       dryRun: options.dryRun,
@@ -186,12 +225,12 @@ program
 
 program
   .command('info')
-  .argument('<bundle>', 'registered name, local path, GitHub URL, or owner/repo')
-  .description('show a bundle’s contents and where each item would land')
+  .argument('<bundle...>', 'registered name(s), local path(s), GitHub URL(s), or owner/repo')
+  .description('show what bundles contain and where each item would land')
   .addOption(scopeOption())
   .addOption(piSubagentsOption())
-  .action(async (bundle, options) => {
-    await infoCommand(bundle, {
+  .action(async (bundles, options) => {
+    await infoCommand(bundles, {
       scope: options.scope as Scope,
       targetOptions: targetOptionsFrom(options),
       cwd,
@@ -228,8 +267,10 @@ program
 
 program
   .command('targets')
-  .description('list supported harnesses and their install locations')
-  .action(() => targetsCommand({ cwd }));
+  .description('list supported harnesses, which are set up here, and the files they share')
+  .action(async () => {
+    await targetsCommand({ cwd });
+  });
 
 program
   .command('export')
@@ -429,12 +470,15 @@ const registry = program.command('registry').description('manage the list of kno
 
 registry
   .command('add')
-  .argument('<source>', 'local path, GitHub URL (web, clone or SSH), or owner/repo[/subdir][#ref]')
-  .option('-n, --name <name>', 'override the registered name')
+  .argument(
+    '<source...>',
+    'local path(s), GitHub URL(s) (web, clone or SSH), or owner/repo[/subdir][#ref]',
+  )
+  .option('-n, --name <name>', 'override the registered name (one source only)')
   .option('--dev', 'read a local bundle in place, so edits apply without re-registering')
-  .description('register a bundle so it can be installed by name or id')
-  .action(async (source, options) => {
-    await registryAddCommand(source, { name: options.name, dev: options.dev, cwd });
+  .description('register bundles so they can be installed by name or id')
+  .action(async (sources, options) => {
+    await registryAddCommand(sources, { name: options.name, dev: options.dev, cwd });
   });
 
 registry

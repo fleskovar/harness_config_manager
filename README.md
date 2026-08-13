@@ -32,12 +32,18 @@ hcm list                         # what can I install?
 hcm info my-kit                  # where would everything land?
 hcm install my-kit --dry-run     # check before writing
 hcm install my-kit               # install into every supported target
+hcm install my-kit -t claude pi  # ...or just the harnesses you mean
+hcm install 1 2 3 -t reasonix    # several bundles in one go
 hcm list --installed             # what is installed here?
 hcm status                       # is it all still intact?
-hcm update my-kit                # re-read the source, reinstall in place
+hcm update                       # re-read the sources, reinstall everything here
 hcm context append               # put back context an agent overwrote
 hcm uninstall my-kit             # remove exactly what was installed
 ```
+
+Bundles and harnesses are both lists — `hcm install 1 2 3 -t reasonix pi` — and
+in a folder used by more than one harness the commands that write ask which one
+you mean. See [One folder, several harnesses](#one-folder-several-harnesses).
 
 Every registered bundle also gets a one-character id, so the above is usually
 `hcm install 1`, `hcm update 1`. If you are *writing* the bundle, register it
@@ -154,7 +160,8 @@ one: **`.mcp.json`** (Claude Code and Pi) and **`AGENTS.md`** (OpenCode and Pi).
 Installing one bundle into both harnesses writes the shared item once, and both
 installations claim it — so uninstalling from either leaves the other working,
 and the item goes when the second one does. See
-[Shared items](#shared-items-written-once-claimed-by-everyone-who-needs-them).
+[Shared items](#shared-items-written-once-claimed-by-everyone-who-needs-them)
+and [One folder, several harnesses](#one-folder-several-harnesses).
 
 Everything outside those two files is per-target and unaffected.
 
@@ -200,6 +207,139 @@ hcm update my-kit --pi-subagents    # moves the subagent, removing the old skill
 the new location and leaves the old file behind, so it warns and points you at
 `hcm update`. The flag also works on `hcm info` (to preview the layout) and on
 `hcm import --install`.
+
+## One folder, several harnesses
+
+A project directory is not one harness's. The same checkout can hold `.claude/`,
+`.reasonix/` and `.pi/`, because the person working in it uses all three. `hcm`
+has always recorded installations per harness — an installation is keyed
+`bundle@target@scope`, and `.hcm/state.json` holds one record, with its own
+receipts, for each — so installing the same bundle into three harnesses gives
+three independent installations that uninstall independently:
+
+```bash
+hcm install my-kit -t claude-code
+hcm install my-kit -t reasonix -t pi
+hcm list --installed
+```
+
+```
+project scope
+  ● my-kit v1.0.0 → claude-code  · 9 item(s) · 2026-08-13
+  ● my-kit v1.0.0 → reasonix     · 7 item(s) · 2026-08-13
+  ● my-kit v1.0.0 → pi           · 8 item(s) · 2026-08-13
+```
+
+`hcm targets` shows which harnesses this folder is actually used by, and `hcm
+status` leads with the same list — both read it from the harnesses' own
+directories, so a harness you set up yourself counts whether or not `hcm` has
+ever installed into it. Ambiguous files do not count as evidence: finding
+`AGENTS.md` says nothing about *which* harness put it there.
+
+### Several at a time
+
+Both halves of a command are lists. Name as many bundles as you like, and as
+many harnesses:
+
+```bash
+hcm install 1 2 3 --target reasonix pi   # three bundles, two harnesses
+hcm install my-kit db-kit -t claude      # names and ids mix freely
+hcm uninstall alpha beta -t pi
+hcm update 1 3 -t reasonix
+hcm info my-kit db-kit
+hcm registry add ./my-kit ./db-kit
+```
+
+A harness can be named by its id, by an alias, or by **any unambiguous prefix**
+— `claude`, `cc`, `reason`, `op`, `oc` all work, and `-t c` is an error naming
+both Claude Code and Copilot rather than a guess. Naming the same harness twice
+installs into it once.
+
+**Bundles come before `--target`.** The option is variadic, so it takes every
+value after it — `hcm install --target pi 1 2 3` reads `1 2 3` as harness names
+and says so:
+
+```
+✖ Unknown target "1"
+  Known targets: claude-code, copilot, reasonix, opencode, pi, or "all".
+  If that was meant to be a bundle, note that bundle names come before
+  --target, which takes every value after it.
+```
+
+**Several bundles is one operation, not a loop.** They are resolved into a
+single dependency graph, so a bundle two of them require is worked out once and
+installed once, a version clash between them is an error naming both rather
+than whichever ran last, and a conflict question is asked once for the whole
+run. The same goes coming out: `hcm uninstall shared alpha` removes a bundle
+together with the one depending on it, which naming either alone would refuse.
+
+**A bad name stops the run before anything is written.** Every reference is
+resolved up front, so `hcm install 1 2 nosuchkit` installs neither 1 nor 2 —
+there is no half-applied list to unpick.
+
+### Saying which harness you mean
+
+In a folder used by more than one harness, `hcm install my-kit` is not a
+complete instruction — it does not say into which. So it is refused rather than
+guessed at:
+
+```
+✖ This folder is set up for more than one harness (Claude Code, Reasonix and Pi),
+  so "hcm install my-kit" needs to be told which one to act on
+  It would otherwise affect: claude-code, copilot, reasonix, opencode, pi
+  Name one or more:  hcm install my-kit -t claude-code
+  Or every harness:  hcm install my-kit -t all
+```
+
+`install`, `uninstall`, `update` and the three writing `hcm context` subcommands
+all ask, and `-t all` is the explicit form of the old blanket default.
+
+**It only asks when there is something to ask.** The question needs both a
+multi-harness folder *and* an operation spanning more than one of them, so
+plenty of commands never see it: `hcm uninstall my-kit` when the bundle only
+ever went into Claude Code, a bundle whose manifest declares one target, a
+folder with one harness in it. In a single-harness folder a blanket install is
+merely wide, so it says so and carries on rather than refusing.
+
+Set [`requireTarget`](#settings) to `always` to be asked everywhere, or to
+`never` for the behaviour `hcm` had before it looked.
+
+### When harnesses share a file
+
+Uninstalling for one harness cannot always take something away from it, and
+this is the reason:
+
+```bash
+hcm install my-kit -t claude-code -t pi
+hcm uninstall my-kit -t pi
+```
+
+```
+  removed  .pi/skills/code-reviewer/SKILL.md
+  held     .mcp.json → mcpServers.filesystem (still required by my-kit)
+! .mcp.json is shared with Claude Code: 1 item(s) were left in place,
+  so Pi still reads them from this file
+```
+
+Nothing has gone wrong. Claude Code still claims that server, so the entry stays
+in `.mcp.json` — and Pi reads the same `.mcp.json`, so Pi still has the server
+it was just uninstalled from. One file cannot be two, so `hcm` says so rather
+than letting you find out later. It goes the other way too: install an MCP
+server for Claude Code alone in a folder where Pi is set up, and Pi gets it.
+
+The same warning appears on the way in, on `hcm context` (one block in
+`AGENTS.md` serves OpenCode and Pi alike), and in `hcm info`, which lists the
+landing places two targets share before you install anything. `hcm targets`
+lists them for the harnesses in the current folder:
+
+```
+Shared between the harnesses in this folder
+  .mcp.json  Claude Code (mcp) · Pi (mcp)
+```
+
+Which files these are is worked out from the target adapters themselves rather
+than from a list kept by hand, so adding a harness that writes `AGENTS.md`
+extends the warnings without anything else changing.
 
 ## Dependencies: bundles that build on other bundles
 
@@ -263,6 +403,7 @@ needing it does:
 hcm uninstall sprint-kit          # takes jira-board too, if nothing else needs it
 hcm uninstall sprint-kit --keep-orphans
 hcm uninstall jira-board          # refused: sprint-kit still requires it
+hcm uninstall jira-board sprint-kit           # …or name both, and neither is left behind
 hcm uninstall jira-board --cascade            # …remove sprint-kit as well
 hcm uninstall jira-board --ignore-dependents  # …or leave it installed without it
 ```
@@ -630,13 +771,13 @@ hcm install my-kit --on-conflict prompt     # ask even where hcm would not have
 
 | Command | What it does |
 | --- | --- |
-| `hcm install <bundle>` | Install, with whatever it requires. `-t/--target`, `-s/--scope`, `--dry-run`, `--force`, `--on-conflict`, `--refresh`, `--no-deps`, `--pi-subagents` |
-| `hcm update <bundle>\|all` | Re-read a registered bundle and reinstall it. `-t`, `-s`, `--dry-run`, `--force`, `--on-conflict`, `--pi-subagents` |
-| `hcm uninstall <bundle>` | Remove exactly what was installed. `-t`, `-s`, `--dry-run`, `--force`, `--cascade`, `--ignore-dependents`, `--keep-orphans` |
+| `hcm install <bundle...>` | Install, with whatever it requires. `-t/--target`, `-s/--scope`, `--dry-run`, `--force`, `--on-conflict`, `--refresh`, `--no-deps`, `--pi-subagents` |
+| `hcm update [<bundle...>\|all]` | Re-read bundles and reinstall them in place. No argument: everything installed here; `all`: everything registered. `-t`, `-s`, `--dry-run`, `--force`, `--on-conflict`, `--pi-subagents` |
+| `hcm uninstall <bundle...>` | Remove exactly what was installed. `-t`, `-s`, `--dry-run`, `--force`, `--cascade`, `--ignore-dependents`, `--keep-orphans` |
 | `hcm list` | Registered bundles (`●` = installed somewhere) |
 | `hcm list --installed` | Installed bundles. `--scope project\|user\|all`, `--json` |
-| `hcm info <bundle>` | Contents, plus where every item would land in each target. `--pi-subagents` |
-| `hcm status` | Verify installed items are still present and unmodified |
+| `hcm info <bundle...>` | Contents, plus where every item would land in each target. `--pi-subagents` |
+| `hcm status` | Which harnesses this folder uses, then whether installed items are still present and unmodified |
 | `hcm context [list]` | Tracked context sections, and whether each is still in its file. `--json` |
 | `hcm context append [bundle...]` | Add back the sections that have gone missing. `-t`, `-s`, `--dry-run`, `--force` |
 | `hcm context override [bundle...]` | Clear the file and rewrite it from the cached sections. `-t`, `-s`, `--dry-run`, `--force` |
@@ -645,14 +786,20 @@ hcm install my-kit --on-conflict prompt     # ask even where hcm would not have
 | `hcm refs fix` | Repair them by picking from a ranked list. `-p/--path`, `--write [file]`, `--file <path>`, `--strict`, `--dry-run` |
 | `hcm validate [dir]` | Check a bundle for common mistakes |
 | `hcm init [dir]` | Scaffold a new bundle |
-| `hcm targets` | Supported harnesses and their paths on this machine |
-| `hcm registry add <source>` | Register a bundle by path, `owner/repo`, or GitHub URL. `--dev`, `-n/--name` |
+| `hcm targets` | Supported harnesses, their paths, which are set up here, and the files they share |
+| `hcm registry add <source...>` | Register bundles by path, `owner/repo`, or GitHub URL. `--dev`, `-n/--name` (one source only) |
 | `hcm registry remove <bundle...>` | Unregister and delete the stored copy |
 | `hcm registry open [bundle]` | Print — and open — where registered bundles are stored |
 | `hcm registry list` | List registered bundles with their ids |
 | `hcm export [file]` | Write installed (or `--registry`) bundles to `bundles.txt` |
 | `hcm import [file]` | Register everything a bundles file lists; `--install` to install too, `--on-conflict` |
 | `hcm config` | Show settings; `config set\|get\|unset` to change them |
+
+`-t/--target` takes one or more harnesses — by id, alias or unambiguous prefix
+(`-t claude pi`) — or `all` for every one of them. In a folder used by several
+harnesses it stops being optional; see
+[One folder, several harnesses](#one-folder-several-harnesses) and
+[Several at a time](#several-at-a-time).
 
 `<bundle>` accepts a registered **name or id**, a local path, or a GitHub
 reference — so `hcm install 3`, `hcm install ./my-kit` and
@@ -667,6 +814,7 @@ usable anywhere a name is:
 ```bash
 hcm registry list           # 1  ts-review-kit v1.0.0
 hcm install 1               # …instead of typing the name
+hcm install 1 2 3 -t pi     # several at once
 hcm update 1
 hcm registry remove 1
 ```
@@ -766,11 +914,25 @@ is nothing to edit in place. Clone the repo and register the clone.
 the old one already was — every target and scope the ledger knows about:
 
 ```bash
+hcm update                  # every bundle installed here — the usual one
 hcm update my-kit           # or: hcm update 1
-hcm update all              # every registered bundle
+hcm update 1 3 db-kit       # several, in registry order however you type them
+hcm update all              # every REGISTERED bundle, installed here or not
 hcm update 1 --dry-run      # show the swap without doing it
 hcm update 1 -t claude-code -s project
 ```
+
+**With no argument it updates what this project actually has**, read from the
+installation ledger — including bundles that arrived automatically as
+dependencies. `all` is the wider one: it refreshes every bundle in the registry,
+which for a bundle installed nowhere is a fetch that changes nothing here.
+`-s/--scope` and `-t/--target` narrow the ledger it reads, so `hcm update -s
+project` means "everything in this project" and leaves your user-scope
+installations alone.
+
+Anything installed here that is *not* registered — a bundle installed straight
+from a path — is named and skipped, because there is nowhere to re-read it from.
+Register its source and it joins the next run.
 
 It is a rollback followed by an install, not a write-over-the-top, because a new
 version is defined as much by what it *removed*: a subagent deleted upstream has
@@ -841,6 +1003,7 @@ hcm config unset cacheDir                   # back to the default
 | --- | --- | --- |
 | `cacheDir` | `~/.hcm/cache` | Where bundles downloaded from GitHub are stored |
 | `storeDir` | `~/.hcm/store` | Where registered bundles themselves are kept |
+| `requireTarget` | `auto` | When a writing command insists on `-t`: `auto` in [multi-harness folders](#one-folder-several-harnesses), `always`, or `never` |
 
 Precedence is environment variable, then `config.json`, then the default:
 
@@ -848,6 +1011,7 @@ Precedence is environment variable, then `config.json`, then the default:
 | --- | --- |
 | `HCM_CACHE_DIR` | `cacheDir` |
 | `HCM_STORE_DIR` | `storeDir` |
+| `HCM_REQUIRE_TARGET` | `requireTarget` |
 | `HCM_HOME` | The whole `~/.hcm` directory — config, registry, user state, cache and store |
 | `HCM_CONFIG` | The path of `config.json` itself |
 
@@ -920,14 +1084,19 @@ src/
 │                       # deps.ts + semver.ts -- the dependency graph
 │                       # registry.ts + store.ts -- ids and the bundle snapshots
 │                       # context.ts -- the cached instruction sections
+│                       # harnesses.ts -- which harnesses a folder uses, and
+│                       #   the gate that makes multi-harness commands explicit
+│                       # overlap.ts -- the files two harnesses both read
 │                       # refs.ts -- finding file references, and what they meant
 │                       # refmap.ts -- repointing them at the installed layout
 ├── merge/              # json-merge.ts, blocks.ts, toml.ts -- the receipt machinery
 └── targets/            # one adapter per harness
 bundles/ts-review-kit/  # sample bundle exercising every resource kind
 tests/                  # merge/rollback unit tests + install round-trip
-└── fixtures/           # sample bundles and projects the tests run against,
-                        # small enough to solve by hand -- see its README
+├── fixtures/           # sample bundles and projects the tests run against,
+│                       # small enough to solve by hand -- see its README
+└── target-<harness>/   # one per harness: the sample bundle that goes in, the
+                        # tree that has to come out, and the test between them
 ```
 
 ## Development
@@ -955,6 +1124,9 @@ Every recipe is a single shell-agnostic command, because make on Windows may
 hand recipes to either `sh` or `cmd.exe`. If you add one, avoid shell builtins
 and pipes — `node -e` handles file operations portably.
 
-Adding a harness means writing one file in `src/targets/` — a `scopeRoot`, a list
-of supported kinds, and a function mapping each resource to writes. The receipt
-and rollback machinery is shared.
+Adding a harness means writing one file in `src/targets/` — a `scopeRoot`, the
+`markers` that mean "this harness is set up here", a list of supported kinds,
+and a function mapping each resource to writes. The receipt and rollback
+machinery is shared, and so is the overlap detection: if the new harness writes
+a file an existing one also reads, that is worked out from the mapping function
+rather than declared.

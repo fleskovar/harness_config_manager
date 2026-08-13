@@ -23,13 +23,54 @@ export interface HcmConfig {
    * is what `hcm install <name>` reads and `hcm update` refreshes.
    */
   storeDir?: string;
+  /**
+   * Whether a command spanning several harnesses has to be told which one it
+   * means. See `core/harnesses.ts` for what each value does.
+   */
+  requireTarget?: RequireTargetPolicy;
 }
 
 /** Settings a user may set, with the help text shown by `hcm config`. */
 export const CONFIG_KEYS: Record<keyof HcmConfig, string> = {
   cacheDir: 'Directory holding bundles downloaded from GitHub',
   storeDir: 'Directory holding the registered bundles themselves',
+  requireTarget: 'When to insist on -t: auto (multi-harness folders), always, never',
 };
+
+// ---------------------------------------------------------------------------
+// requireTarget
+// ---------------------------------------------------------------------------
+
+/**
+ * `auto`   ask for `-t` when the folder is set up for several harnesses and the
+ *          command would touch more than one of them. The default.
+ * `always` ask whenever a command would touch more than one, however the folder
+ *          looks.
+ * `never`  never ask; the blanket defaults hcm had before harnesses were
+ *          detected at all.
+ */
+export type RequireTargetPolicy = 'auto' | 'always' | 'never';
+
+export const REQUIRE_TARGET_POLICIES: RequireTargetPolicy[] = ['auto', 'always', 'never'];
+
+export const DEFAULT_REQUIRE_TARGET: RequireTargetPolicy = 'auto';
+
+export function assertRequireTargetPolicy(value: string): asserts value is RequireTargetPolicy {
+  if (!REQUIRE_TARGET_POLICIES.includes(value as RequireTargetPolicy)) {
+    throw new HcmError(
+      `Invalid value "${value}" for requireTarget`,
+      `Valid values: ${REQUIRE_TARGET_POLICIES.join(', ')}`,
+    );
+  }
+}
+
+/** Precedence: HCM_REQUIRE_TARGET, then config.json, then `auto`. */
+export async function resolveRequireTarget(): Promise<RequireTargetPolicy> {
+  const raw = process.env.HCM_REQUIRE_TARGET ?? (await readConfig()).requireTarget;
+  if (!raw) return DEFAULT_REQUIRE_TARGET;
+  assertRequireTargetPolicy(raw);
+  return raw;
+}
 
 export function hcmHome(): string {
   return process.env.HCM_HOME ?? path.join(os.homedir(), '.hcm');
@@ -77,11 +118,25 @@ export async function resolveStoreDir(): Promise<string> {
   return path.join(hcmHome(), 'store');
 }
 
-/** Env var and default for each setting, so one lookup covers them all. */
-const SETTING_SOURCES: Record<keyof HcmConfig, { env: string; fallback: () => string }> = {
-  cacheDir: { env: 'HCM_CACHE_DIR', fallback: () => path.join(hcmHome(), 'cache') },
-  storeDir: { env: 'HCM_STORE_DIR', fallback: () => path.join(hcmHome(), 'store') },
+/**
+ * Env var and default for each setting, so one lookup covers them all.
+ * `path` marks the settings whose values are directories: those are expanded
+ * and made absolute, and the others -- `requireTarget` is a word, not a place
+ * -- are reported exactly as written.
+ */
+const SETTING_SOURCES: Record<
+  keyof HcmConfig,
+  { env: string; fallback: () => string; path?: boolean }
+> = {
+  cacheDir: { env: 'HCM_CACHE_DIR', fallback: () => path.join(hcmHome(), 'cache'), path: true },
+  storeDir: { env: 'HCM_STORE_DIR', fallback: () => path.join(hcmHome(), 'store'), path: true },
+  requireTarget: { env: 'HCM_REQUIRE_TARGET', fallback: () => DEFAULT_REQUIRE_TARGET },
 };
+
+/** True for settings holding a directory, which are expanded before use. */
+export function isPathSetting(key: keyof HcmConfig): boolean {
+  return SETTING_SOURCES[key]?.path === true;
+}
 
 /** Where a setting's current value comes from, for `hcm config` output. */
 export async function describeSetting(
@@ -90,12 +145,14 @@ export async function describeSetting(
   const setting = SETTING_SOURCES[key];
   if (!setting) throw new HcmError(`Unknown setting "${key}"`);
 
+  const read = (value: string): string => (setting.path ? expandPath(value) : value);
+
   const fromEnv = process.env[setting.env];
-  if (fromEnv) return { value: expandPath(fromEnv), origin: 'env' };
+  if (fromEnv) return { value: read(fromEnv), origin: 'env' };
 
   const config = await readConfig();
   const fromConfig = config[key];
-  if (fromConfig) return { value: expandPath(fromConfig), origin: 'config' };
+  if (fromConfig) return { value: read(fromConfig), origin: 'config' };
 
   return { value: setting.fallback(), origin: 'default' };
 }

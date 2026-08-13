@@ -2,9 +2,16 @@ import { validateBundle } from '../core/bundle.js';
 import { formatDependencyTree, resolveDependencyGraph } from '../core/deps.js';
 import { describeSource } from '../core/github.js';
 import { color, log } from '../core/logger.js';
+import { sharedFiles } from '../core/overlap.js';
 import { buildPlan } from '../core/planner.js';
-import { readRegistry, resolveBundles } from '../core/registry.js';
-import type { LoadedBundle, ResourceKind, Scope, TargetOptions } from '../core/types.js';
+import { asList, readRegistry, resolveBundles } from '../core/registry.js';
+import type {
+  LoadedBundle,
+  ResourceKind,
+  Scope,
+  TargetId,
+  TargetOptions,
+} from '../core/types.js';
 import { TARGET_IDS, getTarget } from '../targets/index.js';
 
 export interface InfoOptions {
@@ -15,8 +22,14 @@ export interface InfoOptions {
 }
 
 /** Show what a bundle contains and where each item would land in every target. */
-export async function infoCommand(reference: string, options: InfoOptions): Promise<void> {
-  const bundles = await resolveBundles(reference, options.cwd);
+export async function infoCommand(
+  references: string | string[],
+  options: InfoOptions,
+): Promise<void> {
+  const bundles: LoadedBundle[] = [];
+  for (const reference of asList(references)) {
+    bundles.push(...(await resolveBundles(reference, options.cwd)));
+  }
   const registry = await readRegistry();
 
   for (const [index, bundle] of bundles.entries()) {
@@ -88,11 +101,46 @@ async function describeBundle(
     }
   }
 
+  describeSharedLandings(bundle, targets, options);
+
   const problems = validateBundle(bundle);
   if (problems.length > 0) {
     log.plain(color.bold('\nWarnings'));
     for (const problem of problems) log.plain(color.yellow(`  ${problem}`));
   }
+}
+
+/**
+ * The landing places above that are not one harness's alone.
+ *
+ * The per-target listings read as if each harness had its own file, and for
+ * almost everything they do. Where they do not, installing into one harness
+ * installs into the other as well -- worth knowing before installing rather
+ * than after uninstalling.
+ */
+function describeSharedLandings(
+  bundle: LoadedBundle,
+  targets: readonly TargetId[],
+  options: InfoOptions,
+): void {
+  if (targets.length < 2) return;
+
+  const kinds = new Set(bundle.resources.map((resource) => resource.kind));
+  const shared = sharedFiles(targets, options.scope, options.cwd, options.targetOptions ?? {})
+    .filter((file) => file.readers.some((reader) => reader.kinds.some((kind) => kinds.has(kind))));
+  if (shared.length === 0) return;
+
+  log.plain(color.bold('\nShared between targets'));
+  for (const file of shared) {
+    const readers = [...new Set(file.readers.map((reader) => reader.target))];
+    log.plain(
+      `  ${file.readers[0]?.path} ` +
+        color.dim(`← ${readers.map((id) => getTarget(id).title).join(', ')}`),
+    );
+  }
+  log.plain(
+    color.dim('  Written once; uninstalling from one of them leaves it for the others.'),
+  );
 }
 
 /**

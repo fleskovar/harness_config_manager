@@ -301,6 +301,18 @@ async function persistRefresh(
 }
 
 /**
+ * The bundle references a command was given, as a list.
+ *
+ * The CLI hands every command an array now that `hcm install 1 2 3` is a thing,
+ * but the commands are called directly too -- from `hcm import`, from `hcm
+ * update`, from the tests -- and there one bundle is one string. Both mean the
+ * same thing, so both are accepted rather than making every caller wrap.
+ */
+export function asList(references: string | string[]): string[] {
+  return typeof references === 'string' ? [references] : references;
+}
+
+/**
  * Resolve a reference to every bundle it names. Accepts a registered name or
  * id, a local path, or a GitHub reference -- so `hcm install ./my-bundle` works
  * without registering first, and a path to a collection installs all of them.

@@ -23,6 +23,16 @@ export interface Target {
   docs: string;
   /** Absolute directory that plan paths are relative to. */
   scopeRoot(scope: Scope, cwd: string): string;
+  /**
+   * Paths under `scopeRoot`, any one of which means this harness is set up
+   * here. `.` means the scope root itself -- which is what identifies a harness
+   * whose user-scope root *is* its own config directory.
+   *
+   * Only unambiguous evidence belongs here. `.mcp.json` and `AGENTS.md` are
+   * written by more than one harness, so finding one says nothing about which
+   * harness put it there; see `core/overlap.ts` for what that costs elsewhere.
+   */
+  markers(scope: Scope): string[];
   /** Kinds this target knows how to install. */
   supports: ResourceKind[];
   /** Anything about this harness a user should know before installing into it. */

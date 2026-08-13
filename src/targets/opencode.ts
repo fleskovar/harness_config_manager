@@ -47,6 +47,11 @@ export const opencode: Target = {
     return scope === 'user' ? opencodeHome() : cwd;
   },
 
+  // Not `AGENTS.md`: Pi reads that too, so it identifies neither of them.
+  markers(scope: Scope): string[] {
+    return scope === 'user' ? ['.'] : ['.opencode', 'opencode.json'];
+  },
+
   actions(resource: BundleResource, ctx: TargetContext): PlanAction[] {
     // At user scope the root is already ~/.config/opencode, so the prefix goes.
     const base = ctx.scope === 'user' ? '' : '.opencode/';

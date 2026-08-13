@@ -1,0 +1,13 @@
+# hcm:begin sample-kit/plugins/filesystem
+[[plugins]]
+name = "filesystem"
+command = "npx"
+args = [ "-y", "@modelcontextprotocol/server-filesystem", "." ]
+env = { FS_LOG = "warn" }
+# hcm:end sample-kit/plugins/filesystem
+
+# hcm:begin sample-kit/settings/settings
+[permissions]
+defaultMode = "acceptEdits"
+allow = [ "Bash(git diff:*)", "Bash(npm test:*)" ]
+# hcm:end sample-kit/settings/settings

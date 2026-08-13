@@ -24,6 +24,12 @@ export const claudeCode: Target = {
     return scope === 'user' ? os.homedir() : cwd;
   },
 
+  // User scope is the home directory itself, so only `.claude` identifies it
+  // there. `.mcp.json` is deliberately absent: Pi reads the same file.
+  markers(scope: Scope): string[] {
+    return scope === 'user' ? ['.claude'] : ['.claude', 'CLAUDE.md'];
+  },
+
   actions(resource: BundleResource, ctx: TargetContext): PlanAction[] {
     switch (resource.kind) {
       case 'subagent':

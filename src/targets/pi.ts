@@ -61,6 +61,12 @@ export const pi: Target = {
     return scope === 'user' ? piHome() : cwd;
   },
 
+  // Everything else Pi uses in a project -- `AGENTS.md`, `.mcp.json` -- it
+  // shares with another harness, so `.pi` is the only thing that means Pi.
+  markers(scope: Scope): string[] {
+    return scope === 'user' ? ['.'] : ['.pi'];
+  },
+
   actions(resource: BundleResource, ctx: TargetContext): PlanAction[] {
     // At user scope the root is already ~/.pi/agent, so the prefix goes.
     const base = ctx.scope === 'user' ? '' : '.pi/';

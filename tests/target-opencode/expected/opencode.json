@@ -1,0 +1,26 @@
+{
+  "mcp": {
+    "filesystem": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "."
+      ],
+      "environment": {
+        "FS_LOG": "warn"
+      }
+    }
+  },
+  "instructions": [
+    ".opencode/rules/typescript.md"
+  ],
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash(git diff:*)",
+      "Bash(npm test:*)"
+    ]
+  }
+}

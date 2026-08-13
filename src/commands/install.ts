@@ -14,9 +14,17 @@ import {
 import { ConflictError, HcmError } from '../core/errors.js';
 import { applyPlan } from '../core/executor.js';
 import { describeSource } from '../core/github.js';
+import {
+  detectHarnesses,
+  expandTargets,
+  type HarnessPresence,
+  requireTargetChoice,
+  warnIfWiderThanTheFolder,
+} from '../core/harnesses.js';
 import { color, log } from '../core/logger.js';
+import { describeReaders, sharedFileNotices } from '../core/overlap.js';
 import { buildPlan } from '../core/planner.js';
-import { resolveBundles } from '../core/registry.js';
+import { asList, resolveBundles } from '../core/registry.js';
 import { findInstallation, upsertInstallation } from '../core/state.js';
 import {
   installationId,
@@ -53,6 +61,13 @@ export interface InstallOptions {
   targetOptions?: TargetOptions;
   /** Install only what was named, leaving its `dependencies` to fail later. */
   noDeps?: boolean;
+  /**
+   * The harnesses this folder is used by, so writes into a file another one
+   * also reads can be flagged. Worked out once at the start of the run and
+   * passed down: detecting again after the first install would find the
+   * harnesses this very command just created.
+   */
+  presentTargets?: TargetId[];
   cwd: string;
 }
 
@@ -73,14 +88,33 @@ export interface BundleRole {
   targets?: TargetId[];
 }
 
-export async function installCommand(reference: string, options: InstallOptions): Promise<void> {
-  const roots = await resolveBundles(reference, options.cwd, {
-    refresh: options.refresh ?? false,
-  });
+/**
+ * Install one bundle, or several.
+ *
+ * Several is not a loop over one. The bundles named in a single command are
+ * resolved into a single dependency graph, so a dependency two of them share is
+ * installed once, a version clash between them is an error rather than a race,
+ * and the conflict questions are asked once for the whole run.
+ */
+export async function installCommand(
+  references: string | string[],
+  options: InstallOptions,
+): Promise<void> {
+  const wanted = asList(references);
+  const roots: LoadedBundle[] = [];
+
+  // Every reference is resolved before anything is planned, so a name that
+  // turns out not to exist stops the run before the earlier ones are written.
+  for (const reference of wanted) {
+    roots.push(
+      ...(await resolveBundles(reference, options.cwd, { refresh: options.refresh ?? false })),
+    );
+  }
 
   // One shared memory of answers for the whole command.
   const decisions = options.decisions ?? new Map<string, Resolution>();
-  options = { ...options, decisions };
+  const chosen = expandTargets(options.targets);
+  options = { ...options, decisions, ...(chosen ? { targets: chosen } : {}) };
 
   if (roots.length > 1) {
     log.info(
@@ -97,6 +131,22 @@ export async function installCommand(reference: string, options: InstallOptions)
   else logDependencyTree(graph, roots);
 
   const targets = targetsPerBundle(graph, options);
+  const affected = [...new Set([...targets.values()].flat())];
+
+  // In a folder used by several harnesses, "install this" is not a complete
+  // instruction -- say which. Detection also feeds the shared-file warnings
+  // below, so it happens once, here, before anything is written.
+  const command = `hcm install ${wanted.join(' ')}`;
+  const found = await requireTargetChoice({
+    ...(chosen ? { chosen } : {}),
+    affected,
+    command,
+    scope: options.scope,
+    cwd: options.cwd,
+  });
+  warnIfWiderThanTheFolder(found, chosen, affected, command, (message) => log.warn(message));
+
+  options = { ...options, presentTargets: presentAfterThisRun(found, affected) };
 
   // `graph.order` puts dependencies first, so by the time a dependent is
   // planned its dependency's items are on disk and claimed -- which is what
@@ -155,6 +205,16 @@ function targetsPerBundle(
   }
 
   return new Map([...chosen].map(([name, targets]) => [name, [...targets]]));
+}
+
+/**
+ * The harnesses that will be using this folder once the run finishes: the ones
+ * already here, plus the ones being installed into. A file shared with a
+ * harness this very command is setting up is just as shared as one shared with
+ * a harness that was here yesterday.
+ */
+function presentAfterThisRun(found: HarnessPresence[], affected: TargetId[]): TargetId[] {
+  return [...new Set([...found.map((harness) => harness.target), ...affected])];
 }
 
 /** The graph `--no-deps` implies: the roots, and nothing they asked for. */
@@ -297,6 +357,7 @@ export async function installInto(
   }
 
   reportReferences(plan);
+  await reportSharedFiles(plan.actions.map((action) => action.path), targetId, options);
 
   for (const action of plan.actions) {
     const mark = action.adopt || action.share ? color.dim('=') : color.green('+');
@@ -351,6 +412,42 @@ export async function installInto(
   );
   if (cached > 0) {
     log.debug(`cached ${cached} context section(s) for "hcm context append"`);
+  }
+}
+
+/**
+ * Warn about the writes that land in a file another harness also reads.
+ *
+ * `-t claude-code` reads as "only Claude Code", and for everything under
+ * `.claude/` it is. `.mcp.json` is not: Pi reads the same file, so in a folder
+ * where Pi is set up the server installs for Pi as well, and comes back out
+ * only when the last claim on it does. Neither surprise is avoidable -- one
+ * file cannot be two -- so both are said out loud.
+ */
+async function reportSharedFiles(
+  paths: string[],
+  targetId: TargetId,
+  options: InstallOptions,
+): Promise<void> {
+  const present = options.presentTargets ?? (await detectHarnesses(options.scope, options.cwd)).map(
+    (harness) => harness.target,
+  );
+
+  const notices = sharedFileNotices({
+    target: targetId,
+    paths,
+    scope: options.scope,
+    cwd: options.cwd,
+    present,
+    ...(options.targetOptions ? { options: options.targetOptions } : {}),
+  });
+
+  for (const notice of notices) {
+    log.warn(
+      `  ${notice.path} is shared with ${describeReaders(notice.others)}: ` +
+        'what is written here is visible to all of them, and uninstalling from one ' +
+        'leaves it in place for the others',
+    );
   }
 }
 

@@ -24,10 +24,12 @@ import {
   trackedBundles,
 } from '../core/context.js';
 import { HcmError } from '../core/errors.js';
+import { expandTargets, requireTargetChoice } from '../core/harnesses.js';
 import { color, log } from '../core/logger.js';
+import { describeReaders, sharedFileNotices } from '../core/overlap.js';
 import { confirm, isInteractive } from '../core/prompt.js';
 import { resolveInstalledName } from '../core/registry.js';
-import type { Scope } from '../core/types.js';
+import type { Scope, TargetId } from '../core/types.js';
 import { getTarget } from '../targets/index.js';
 
 export interface ContextOptions {
@@ -102,7 +104,7 @@ async function selectBundles(
 
 async function gather(references: string[], options: ContextOptions): Promise<ContextFile[]> {
   const bundles = await selectBundles(references, options);
-  const targets = options.targets?.length ? options.targets.map((id) => getTarget(id).id) : undefined;
+  const targets = expandTargets(options.targets);
 
   const files: ContextFile[] = [];
   for (const scope of scopesOf(options)) {
@@ -114,6 +116,68 @@ async function gather(references: string[], options: ContextOptions): Promise<Co
     );
   }
   return files;
+}
+
+/**
+ * The gate the writing subcommands share.
+ *
+ * `hcm context append` touches a harness's standing-instruction file, so in a
+ * multi-harness folder it needs the same `-t` the writing commands do -- and
+ * more so, because `AGENTS.md` is one file for two harnesses. Narrowing to `-t
+ * pi` does not narrow the file: the block written there is the block OpenCode
+ * reads, and removing it takes it from both.
+ */
+async function assertTargetChosen(
+  command: string,
+  files: ContextFile[],
+  options: ContextOptions,
+): Promise<TargetId[]> {
+  const chosen = expandTargets(options.targets);
+  const present = new Set<TargetId>();
+
+  for (const scope of scopesOf(options)) {
+    const forScope = files.filter((file) => file.scope === scope);
+    if (forScope.length === 0) continue;
+
+    const found = await requireTargetChoice({
+      ...(chosen ? { chosen } : {}),
+      affected: [...new Set(forScope.flatMap((file) => file.targets))],
+      command,
+      scope,
+      cwd: options.cwd,
+    });
+    for (const harness of found) present.add(harness.target);
+  }
+
+  return [...present];
+}
+
+/**
+ * Flag the instruction files another harness reads as well. One block in
+ * `AGENTS.md` serves OpenCode and Pi alike, so every outcome here -- appended,
+ * rewritten, removed -- lands on both of them whatever `-t` said.
+ */
+function warnAboutSharedFiles(
+  files: ContextFile[],
+  present: TargetId[],
+  options: ContextOptions,
+): void {
+  for (const file of files) {
+    const notices = sharedFileNotices({
+      target: file.target,
+      paths: [file.path],
+      scope: file.scope,
+      cwd: options.cwd,
+      present: [...new Set([...present, ...file.targets])],
+    });
+
+    for (const notice of notices) {
+      log.warn(
+        `${notice.path} is shared with ${describeReaders(notice.others)}: ` +
+          'one block serves them all, so this change reaches every one of them',
+      );
+    }
+  }
 }
 
 /** Nothing tracked at all is worth explaining rather than printing an empty list. */
@@ -263,6 +327,9 @@ export async function contextAppendCommand(
     return;
   }
 
+  const present = await assertTargetChosen('hcm context append', files, options);
+  warnAboutSharedFiles(files, present, options);
+
   const apply: ContextApplyOptions = {
     ...(options.dryRun ? { dryRun: true } : {}),
     ...(options.force ? { force: true } : {}),
@@ -300,6 +367,9 @@ export async function contextOverrideCommand(
     nothingTracked(options);
     return;
   }
+
+  const present = await assertTargetChosen('hcm context override', files, options);
+  warnAboutSharedFiles(files, present, options);
 
   const apply: ContextApplyOptions = { ...(options.dryRun ? { dryRun: true } : {}) };
   const results: ContextFileResult[] = [];
@@ -374,6 +444,9 @@ export async function contextRemoveCommand(
     nothingTracked(options);
     return;
   }
+
+  const present = await assertTargetChosen('hcm context remove', files, options);
+  warnAboutSharedFiles(files, present, options);
 
   const apply: ContextApplyOptions = { ...(options.dryRun ? { dryRun: true } : {}) };
   const results: ContextFileResult[] = [];

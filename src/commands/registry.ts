@@ -4,19 +4,37 @@ import { ensureDir } from '../core/fsx.js';
 import { describeSource } from '../core/github.js';
 import { color, log } from '../core/logger.js';
 import { storeDir } from '../core/paths.js';
-import { addToRegistry, readRegistry, removeFromRegistry, requireEntry } from '../core/registry.js';
+import {
+  addToRegistry,
+  asList,
+  readRegistry,
+  removeFromRegistry,
+  requireEntry,
+} from '../core/registry.js';
 import { storeEntryDir } from '../core/store.js';
 import { readState } from '../core/state.js';
 import type { RegistryEntry, Scope } from '../core/types.js';
 
 export async function registryAddCommand(
-  source: string,
+  sources: string | string[],
   options: { name?: string; dev?: boolean; cwd: string },
 ): Promise<void> {
-  const entries = await addToRegistry(source, options.cwd, {
-    name: options.name,
-    dev: options.dev,
-  });
+  const wanted = asList(sources);
+
+  // `--name` renames the entry, so it can only mean one of them.
+  if (options.name && wanted.length > 1) {
+    throw new HcmError(
+      '--name takes one bundle, but several sources were given',
+      'Register them one at a time to name each, or drop --name to keep their own names.',
+    );
+  }
+
+  const entries: RegistryEntry[] = [];
+  for (const source of wanted) {
+    entries.push(
+      ...(await addToRegistry(source, options.cwd, { name: options.name, dev: options.dev })),
+    );
+  }
 
   for (const entry of entries) {
     const mode = entry.dev ? color.yellow(' [dev]') : '';
@@ -38,12 +56,13 @@ export async function registryAddCommand(
     );
   }
 
+  // One command, however many were registered: `hcm install` takes a list.
   const ids = entries.map((entry) => entry.id);
   log.info(
     color.dim(
       ids.length === 1
         ? `Install it with: hcm install ${ids[0]}`
-        : `Install them with: ${ids.map((id) => `hcm install ${id}`).join(' && ')}`,
+        : `Install them with: hcm install ${ids.join(' ')}`,
     ),
   );
 }

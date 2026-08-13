@@ -157,8 +157,9 @@ describe('capturing context on install', () => {
     expect(await driftedItems()).toBe(0);
 
     // Removing the block takes it away from OpenCode and Pi alike, so neither
-    // installation should be left claiming it.
-    await contextRemoveCommand([], options());
+    // installation should be left claiming it. Two harnesses share this file,
+    // so the command has to say which it means: `all` is how you mean both.
+    await contextRemoveCommand([], options({ targets: ['all'] }));
     expect(await driftedItems()).toBe(0);
 
     const state = await readState('project', projectDir);
@@ -166,7 +167,7 @@ describe('capturing context on install', () => {
       expect(record.receipts.filter((receipt) => receipt.op === 'block')).toEqual([]);
     }
 
-    await contextAppendCommand([], options());
+    await contextAppendCommand([], options({ targets: ['all'] }));
     expect(await driftedItems()).toBe(0);
     const after = await readState('project', projectDir);
     for (const record of after.installations) {

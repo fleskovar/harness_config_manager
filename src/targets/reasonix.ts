@@ -37,6 +37,10 @@ export const reasonix: Target = {
     return scope === 'user' ? reasonixHome() : cwd;
   },
 
+  markers(scope: Scope): string[] {
+    return scope === 'user' ? ['.'] : ['.reasonix', 'REASONIX.md', 'reasonix.toml'];
+  },
+
   actions(resource: BundleResource, ctx: TargetContext): PlanAction[] {
     // At user scope the root is already the Reasonix home directory.
     const base = ctx.scope === 'user' ? '' : '.reasonix/';
