@@ -1,0 +1,3 @@
+name: broken-refs-kit
+version: 1.0.0
+description: "A bundle whose files point at each other, four of them wrongly. Solve it by hand, then compare."

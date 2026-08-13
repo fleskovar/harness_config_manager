@@ -1,0 +1,7 @@
+name: review-kit
+version: 2.0.0
+description: "review-kit v2: the subagent is renamed, and the pull-request section is gone."
+author: harness-config-manager
+tags:
+  - sample
+  - review

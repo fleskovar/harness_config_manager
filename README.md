@@ -926,6 +926,8 @@ src/
 └── targets/            # one adapter per harness
 bundles/ts-review-kit/  # sample bundle exercising every resource kind
 tests/                  # merge/rollback unit tests + install round-trip
+└── fixtures/           # sample bundles and projects the tests run against,
+                        # small enough to solve by hand -- see its README
 ```
 
 ## Development
