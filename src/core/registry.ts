@@ -10,6 +10,7 @@
 import path from 'node:path';
 import { discoverBundleDirs, loadBundle } from './bundle.js';
 import { HcmError } from './errors.js';
+import { summarizeFlavors } from './flavors.js';
 import { isDirectory, readJsonIfExists, toPosix, writeJson } from './fsx.js';
 import { describeSource, parseGithubSource, resolveSource } from './github.js';
 import { registryFile } from './paths.js';
@@ -207,6 +208,7 @@ export async function addToRegistry(
       ...(bundle.manifest.description ? { description: bundle.manifest.description } : {}),
       ...(bundle.manifest.tags ? { tags: bundle.manifest.tags } : {}),
       ...(bundle.dependencies.length > 0 ? { dependencies: bundle.dependencies } : {}),
+      ...(bundle.flavors.length > 0 ? { flavors: summarizeFlavors(bundle.flavors) } : {}),
       ...(options.dev ? { dev: true } : { store: storeSlug({ id, name }) }),
       addedAt: existing?.addedAt ?? new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -286,12 +288,15 @@ async function persistRefresh(
     ...(bundle.manifest.tags ? { tags: bundle.manifest.tags } : {}),
     // Replaced wholesale, so a dependency dropped upstream disappears here too.
     ...(bundle.dependencies.length > 0 ? { dependencies: bundle.dependencies } : {}),
+    ...(bundle.flavors.length > 0 ? { flavors: summarizeFlavors(bundle.flavors) } : {}),
     ...(entry.dev ? {} : { store: entry.store ?? storeSlug(entry) }),
     updatedAt: new Date().toISOString(),
   };
 
-  // A bundle that has stopped requiring anything should stop saying it does.
+  // A bundle that has stopped requiring anything should stop saying it does,
+  // and the same for a flavor dropped upstream.
   if (bundle.dependencies.length === 0) delete updated.dependencies;
+  if (bundle.flavors.length === 0) delete updated.flavors;
 
   const index = registry.entries.indexOf(current);
   if (index >= 0) registry.entries[index] = updated;

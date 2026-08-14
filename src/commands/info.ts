@@ -1,5 +1,6 @@
 import { validateBundle } from '../core/bundle.js';
 import { formatDependencyTree, resolveDependencyGraph } from '../core/deps.js';
+import { assertFlavorsAvailable, expandFlavors } from '../core/flavors.js';
 import { describeSource } from '../core/github.js';
 import { color, log } from '../core/logger.js';
 import { sharedFiles } from '../core/overlap.js';
@@ -18,6 +19,8 @@ export interface InfoOptions {
   scope: Scope;
   /** Preview the layout for a machine with these extensions installed. */
   targetOptions?: TargetOptions;
+  /** Preview a narrowed install rather than the whole bundle. */
+  flavors?: string[];
   cwd: string;
 }
 
@@ -30,6 +33,12 @@ export async function infoCommand(
   for (const reference of asList(references)) {
     bundles.push(...(await resolveBundles(reference, options.cwd)));
   }
+
+  // The same refusal `hcm install` gives, so previewing a flavor you have
+  // misspelled says so rather than showing you a suspiciously small bundle.
+  options = { ...options, flavors: expandFlavors(options.flavors) ?? [] };
+  assertFlavorsAvailable(bundles, options.flavors as string[]);
+
   const registry = await readRegistry();
 
   for (const [index, bundle] of bundles.entries()) {
@@ -54,11 +63,15 @@ async function describeBundle(
   if (manifest.tags?.length) log.plain(color.dim(`tags: ${manifest.tags.join(', ')}`));
 
   await describeDependencies(bundle, options);
+  describeFlavors(bundle, options);
 
   const byKind = new Map<ResourceKind, string[]>();
   for (const resource of bundle.resources) {
     const list = byKind.get(resource.kind) ?? [];
-    list.push(resource.name);
+    // Marked rather than hidden: what a flavor leaves out is as much a part of
+    // reading a bundle as what it takes.
+    const flavors = resource.flavors.length ? color.dim(` (${resource.flavors.join('/')})`) : '';
+    list.push(`${resource.name}${flavors}`);
     byKind.set(resource.kind, list);
   }
 
@@ -78,6 +91,7 @@ async function describeBundle(
       options.scope,
       options.cwd,
       options.targetOptions ?? {},
+      options.flavors ?? [],
     );
 
     log.plain(color.bold(`\n${target.title}`) + color.dim(` · ${options.scope}`));
@@ -141,6 +155,44 @@ function describeSharedLandings(
   log.plain(
     color.dim('  Written once; uninstalling from one of them leaves it for the others.'),
   );
+}
+
+/**
+ * The subsets this bundle can be installed as, and what each one holds.
+ *
+ * Printed against the *whole* bundle even when `--flavor` narrowed the preview,
+ * because the question it answers -- what else could I have asked for -- is
+ * exactly the one a narrowed listing cannot.
+ */
+function describeFlavors(bundle: LoadedBundle, options: InfoOptions): void {
+  if (bundle.flavors.length === 0) return;
+
+  const requested = new Set((options.flavors ?? []).map((name) => name.toLowerCase()));
+  log.plain(color.bold('\nFlavors'));
+
+  for (const flavor of bundle.flavors) {
+    const members = bundle.resources.filter((resource) =>
+      resource.flavors.some((name) => name.toLowerCase() === flavor.name.toLowerCase()),
+    );
+    const mark = requested.has(flavor.name.toLowerCase()) ? color.green('●') : color.dim('○');
+
+    log.plain(
+      `  ${mark} ${color.bold(flavor.name)} ` +
+        color.dim(`${members.length} resource(s)`) +
+        (flavor.description ? ` ${color.dim(`— ${flavor.description}`)}` : ''),
+    );
+    for (const member of members) log.plain(color.dim(`      ${member.bundlePath}`));
+  }
+
+  const common = bundle.resources.filter((resource) => resource.flavors.length === 0);
+  log.plain(
+    color.dim(
+      `  ${common.length} resource(s) belong to no flavor and install whatever you ask for.`,
+    ),
+  );
+  if (requested.size === 0) {
+    log.plain(color.dim('  Installing without --flavor installs all of it.'));
+  }
 }
 
 /**

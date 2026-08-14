@@ -108,7 +108,10 @@ async function collectFromState(options: ExportOptions): Promise<Collected> {
   const skipped: Collected['skipped'] = [];
   // One bundle can be installed into several targets; export it once, but
   // record every target so the note explains what the setup actually was.
-  const seen = new Map<string, { source: BundleSource; targets: string[]; version: string }>();
+  const seen = new Map<
+    string,
+    { source: BundleSource; targets: string[]; version: string; flavors?: string[] }
+  >();
 
   for (const scope of scopes) {
     const state = await readState(scope, options.cwd);
@@ -122,6 +125,7 @@ async function collectFromState(options: ExportOptions): Promise<Collected> {
         source: record.source,
         targets: [record.target],
         version: record.version,
+        ...(record.flavors?.length ? { flavors: record.flavors } : {}),
       });
     }
   }
@@ -132,9 +136,13 @@ async function collectFromState(options: ExportOptions): Promise<Collected> {
       skipped.push({ name, location: describeSource(info.source) });
       continue;
     }
+    // The file is a list of sources, with no room to say "part of this one" --
+    // so a narrowed install is recorded in the comment, for whoever reads it to
+    // pass `--flavor` themselves.
+    const part = info.flavors?.length ? ` (installed as: --flavor ${info.flavors.join(' ')})` : '';
     exported.push({
       reference,
-      note: `${name} v${info.version} -> ${info.targets.join(', ')}`,
+      note: `${name} v${info.version} -> ${info.targets.join(', ')}${part}`,
     });
   }
 

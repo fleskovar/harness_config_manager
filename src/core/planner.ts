@@ -6,6 +6,7 @@
  * plan that never reaches the executor.
  */
 
+import { inFlavors } from './flavors.js';
 import { fromPosix, readBytesIfExists, readTextIfExists } from './fsx.js';
 import { hashValue, sha256 } from './hash.js';
 import { remapReferences } from './refmap.js';
@@ -35,6 +36,7 @@ export async function buildPlan(
   scope: Scope,
   cwd: string,
   targetOptions: TargetOptions = {},
+  flavors: string[] = [],
 ): Promise<InstallPlan> {
   const target = getTarget(targetId);
   const scopeRoot = target.scopeRoot(scope, cwd);
@@ -48,6 +50,7 @@ export async function buildPlan(
       target: targetId,
       scope,
       targetOptions,
+      flavors,
       scopeRoot,
       actions: [],
       conflicts: [],
@@ -59,6 +62,13 @@ export async function buildPlan(
   }
 
   for (const resource of bundle.resources) {
+    // A narrowed install is one that plans less. Everything downstream --
+    // conflicts, receipts, the context cache -- then describes the subset
+    // without having to know a flavor exists.
+    if (!inFlavors(resource, flavors)) {
+      skipped.push({ resource, reason: `not in the flavor(s) asked for: ${flavors.join(', ')}` });
+      continue;
+    }
     if (!target.supports.includes(resource.kind)) {
       skipped.push({ resource, reason: `${target.title} has no mapping for ${resource.kind}` });
       continue;
@@ -78,6 +88,7 @@ export async function buildPlan(
     target: targetId,
     scope,
     targetOptions,
+    flavors,
     scopeRoot,
     actions: remap.actions,
     conflicts,

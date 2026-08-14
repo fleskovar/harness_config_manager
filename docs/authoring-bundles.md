@@ -20,7 +20,8 @@ result, with nothing to refresh in between.
 
 `hcm validate` checks for the mistakes that actually bite: subagents and skills
 without a `description`, MCP servers with neither `command` nor `url`, malformed
-`appliesTo`, and duplicate names within a kind.
+`appliesTo`, duplicate names within a kind, and flavors that do not line up with
+the resources claiming them.
 
 ## The manifest
 
@@ -36,6 +37,8 @@ targets: [claude-code, copilot]   # optional; omit to support all
                                   #            opencode, pi
 dependencies:                     # optional; see below
   - jira-board@^1.2.0
+flavors:                          # optional; subsets, see below
+  python: Python tooling
 ```
 
 Set `targets` only when a bundle genuinely does not make sense elsewhere.
@@ -87,6 +90,95 @@ Depending on a bundle is also the way to *share* resources deliberately. If your
 kit ships the same `skills/jira-board/` as the bundle it requires, byte for
 byte, the second install writes nothing and both claim the one copy — see
 [Conventions that avoid conflicts](#conventions-that-avoid-conflicts).
+
+## Flavors: letting users take part of your kit
+
+Some kits split cleanly down the middle. A coding kit that covers Python and C#
+has a common half — the review command, the house conventions, the PR checklist —
+and two language halves that most users only want one of. A **flavor** names a
+half so users can ask for it:
+
+```bash
+hcm install coding-kit --flavor python
+```
+
+Everything in no flavor is *common* and installs either way. That default is the
+important one: it means adding flavors to an existing kit changes nothing for
+anyone who does not pass `--flavor`, and it means you only tag the parts that are
+genuinely optional.
+
+**Markdown resources tag themselves**, which keeps the fact next to the thing:
+
+```markdown
+---
+description: Runs pytest, reads the failures, and reports the shortest path to green.
+flavors: [python]
+---
+```
+
+The key is stripped before the file is installed, so no harness ever sees it. A
+resource can be in more than one flavor (`flavors: [python, csharp]`), and
+`flavor: python` in the singular works too.
+
+**`mcp/`, `settings/` and `assets/` have no frontmatter to write in**, so the
+manifest names them by path. A pattern that names a directory takes everything
+under it, and `*`, `**` and `?` work as you would expect:
+
+```yaml
+flavors:
+  python:
+    description: Python typing, linting and test tooling
+    includes:
+      - rules/python.md
+      - mcp/pyright.json
+      - assets/python          # …and every file inside it
+      - skills/pytest-*
+  csharp:
+    description: C# analyzers and conventions
+    includes: [rules/csharp.md]
+```
+
+Both ways feed one list, so use whichever suits each resource. Three shapes are
+accepted: a bare list of names (`flavors: [python, csharp]`), a mapping of name
+to description, and the mapping-of-mappings above.
+
+**Declaring them in the manifest is optional but worth it.** Leave `flavors:` out
+entirely and the flavors are whatever your resources named for themselves — which
+is the shortest thing that works for an all-markdown kit. Put them in the
+manifest and you get three things: a description for `hcm registry list` and
+`hcm info`, somewhere to write path patterns, and `hcm validate` checking your
+work:
+
+```
+$ hcm validate ./coding-kit
+coding-kit v1.0.0
+  12 resource(s)
+!   subagents/rust-clippy.md: flavor "rust" is not declared in the manifest (it declares: python, csharp)
+!   Flavor "python": "rules/pythn.md" matches nothing in the bundle
+!   Flavor "csharp" has no resources; "--flavor csharp" would install the common part and nothing else
+```
+
+That first one is the mistake worth catching. A misspelled tag in a resource's
+frontmatter silently excludes it from the flavor its author meant, and the
+symptom — a bundle that installs slightly less than it should — is one nobody
+looks for.
+
+**Check the split with `hcm info`** before you publish. It lists every flavor,
+what belongs to it, and how many resources are common:
+
+```bash
+hcm info ./coding-kit --flavor python
+```
+
+Two things to keep in mind while dividing a kit up:
+
+- **`all` is not available as a flavor name.** Users type `--flavor all` to widen
+  a narrowed installation back to the whole bundle.
+- **A flavor is not a substitute for a separate bundle.** Users install and
+  uninstall at bundle granularity, and dependencies, versions and updates are all
+  per-bundle. Reach for a flavor when the pieces genuinely share a common half
+  and a version number; reach for a
+  [collection](#shipping-several-bundles-together) when they do not.
 
 ## Writing each resource kind
 
@@ -511,6 +603,16 @@ If your bundle has dependencies, install it into an empty directory and then
 uninstall it: everything it pulled in should go too, and the directory should be
 as it started. Then install the dependency by name first and repeat — this time
 it should stay, because you asked for it yourself.
+
+If it has flavors, install each one into its own empty directory and read the
+file list. What you are checking is not that the flavor's own files arrived — it
+is that the *common* half is complete without them: a command that references a
+skill you tagged `python` is a broken reference for everyone who installed
+`--flavor csharp`, and `hcm install` reports exactly that:
+
+```
+! .claude/commands/review-pr.md: "skills/pytest-runner/SKILL.md" the file it names is not installed into this harness
+```
 
 ## Conventions that avoid conflicts
 

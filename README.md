@@ -82,6 +82,9 @@ targets: [claude-code, copilot, reasonix, opencode, pi]
 # Bundles this one needs; installed first. See "Dependencies" below.
 dependencies:
   - jira-board@^1.2.0
+# Subsets it can be installed as. See "Flavors" below.
+flavors:
+  python: Python tooling
 ```
 
 ## Where things land
@@ -415,6 +418,117 @@ entirely, and says what it skipped.
 `hcm update` installs dependencies a new version has gained, and leaves ones
 that are already there alone — updating one bundle should not quietly update
 another. Use `hcm update all` for that.
+
+## Flavors: installing part of a bundle
+
+A coding kit that covers Python and C# is one bundle — the review command, the
+house conventions, the PR checklist are the same either way — but half of what it
+ships is only useful in one language. Splitting it into two kits duplicates the
+common half; shipping it whole puts C# subagents in front of people who write
+Python. A **flavor** names the half:
+
+```bash
+hcm install coding-kit --flavor python
+hcm install coding-kit --flavor python csharp    # both
+hcm install coding-kit                           # all of it, as always
+```
+
+Two rules, and everything else follows from them:
+
+1. **A resource in no flavor is *common*** and installs whatever you ask for.
+   This is why a bundle that has never heard of flavors installs in full.
+2. **A resource in at least one flavor** installs only when one of its flavors
+   was asked for. Asking for none asks for all of them.
+
+**A markdown resource joins a flavor in its own frontmatter**, which is where the
+fact belongs — next to the thing it is a fact about:
+
+```markdown
+---
+description: Runs pytest, reads the failures, and reports the shortest path to green.
+flavors: [python]
+---
+```
+
+**The manifest joins the rest by path**, since `mcp/`, `settings/` and `assets/`
+have no frontmatter to write in. A pattern naming a directory takes everything
+under it:
+
+```yaml
+flavors:
+  python:
+    description: Python typing, linting and test tooling
+    includes:
+      - rules/python.md
+      - mcp/pyright.json
+      - assets/python          # …and everything inside it
+  csharp:
+    description: C# analyzers and conventions
+    includes: [rules/csharp.md]
+```
+
+Both mechanisms feed one list, so a kit can use whichever suits each resource.
+Declaring flavors in the manifest is optional — leave it out and the flavors are
+whatever the resources named for themselves, which is the shortest way to write
+an all-markdown kit. Declare them and the list becomes the authority: `hcm
+validate` reports a resource claiming a flavor that is not on it, a pattern that
+matches nothing, and a flavor nothing belongs to.
+
+**What the parts are is printed where you would look for it** — `hcm registry
+list`, `hcm list`, and in full by `hcm info`, which names every member and marks
+the flavor you are previewing:
+
+```
+$ hcm info coding-kit --flavor python
+Flavors
+  ● python 5 resource(s) — Python typing, linting and test tooling
+      mcp/pyright.json
+      rules/python.md
+      skills/pytest-runner
+      subagents/python-typer.md
+      assets/python/lint.sh
+  ○ csharp 2 resource(s) — C# analyzers and conventions
+      rules/csharp.md
+      subagents/csharp-analyzer.md
+  5 resource(s) belong to no flavor and install whatever you ask for.
+```
+
+**Nothing downstream knows a flavor exists.** A narrowed install is one that
+*plans* less, so its receipts claim exactly what it wrote — and uninstall,
+`hcm status` and rollback need no special case. The choice is recorded with the
+installation, so `hcm update` puts the same subset back without being told:
+
+```bash
+hcm update coding-kit                    # the flavors it was installed with
+hcm update coding-kit --flavor csharp    # switch: the Python half is removed, not orphaned
+hcm update coding-kit --flavor all       # widen back to the whole bundle
+```
+
+`all` is reserved as a flavor name for exactly that reason: with the flag
+omitted meaning "whatever was recorded", widening again needs something to say.
+
+**A misspelled flavor is refused**, because the alternative is installing the
+common part and silently dropping the half you asked for:
+
+```
+✖ "coding-kit" has no flavor "pyhton"
+It offers: python, csharp
+```
+
+**Naming several bundles with one `--flavor` needs all of them to define it.**
+One flag cannot mean the Python part of one kit and the whole of another, and
+choosing either reading for you would be a guess:
+
+```
+✖ --flavor python does not apply to "db-kit"
+Installing several bundles at once with --flavor needs every one of them to
+define the flavor. Install them one at a time to give each its own.
+```
+
+**A dependency needs no exception.** It inherits the run's flavors, and a bundle
+with no flavors is entirely common — so one that has never heard of `python`
+arrives whole, and one that happens to share the flavor is narrowed the same way
+its dependent was. `hcm install` says which happened.
 
 ## Shared items: written once, claimed by everyone who needs them
 
@@ -771,12 +885,12 @@ hcm install my-kit --on-conflict prompt     # ask even where hcm would not have
 
 | Command | What it does |
 | --- | --- |
-| `hcm install <bundle...>` | Install, with whatever it requires. `-t/--target`, `-s/--scope`, `--dry-run`, `--force`, `--on-conflict`, `--refresh`, `--no-deps`, `--pi-subagents` |
-| `hcm update [<bundle...>\|all]` | Re-read bundles and reinstall them in place. No argument: everything installed here; `all`: everything registered. `-t`, `-s`, `--dry-run`, `--force`, `--on-conflict`, `--pi-subagents` |
+| `hcm install <bundle...>` | Install, with whatever it requires. `-t/--target`, `-f/--flavor`, `-s/--scope`, `--dry-run`, `--force`, `--on-conflict`, `--refresh`, `--no-deps`, `--pi-subagents` |
+| `hcm update [<bundle...>\|all]` | Re-read bundles and reinstall them in place. No argument: everything installed here; `all`: everything registered. `-t`, `-f`, `-s`, `--dry-run`, `--force`, `--on-conflict`, `--pi-subagents` |
 | `hcm uninstall <bundle...>` | Remove exactly what was installed. `-t`, `-s`, `--dry-run`, `--force`, `--cascade`, `--ignore-dependents`, `--keep-orphans` |
 | `hcm list` | Registered bundles (`●` = installed somewhere) |
 | `hcm list --installed` | Installed bundles. `--scope project\|user\|all`, `--json` |
-| `hcm info <bundle...>` | Contents, plus where every item would land in each target. `--pi-subagents` |
+| `hcm info <bundle...>` | Contents, its flavors, plus where every item would land in each target. `-f/--flavor`, `--pi-subagents` |
 | `hcm status` | Which harnesses this folder uses, then whether installed items are still present and unmodified |
 | `hcm context [list]` | Tracked context sections, and whether each is still in its file. `--json` |
 | `hcm context append [bundle...]` | Add back the sections that have gone missing. `-t`, `-s`, `--dry-run`, `--force` |
@@ -792,7 +906,7 @@ hcm install my-kit --on-conflict prompt     # ask even where hcm would not have
 | `hcm registry open [bundle]` | Print — and open — where registered bundles are stored |
 | `hcm registry list` | List registered bundles with their ids |
 | `hcm export [file]` | Write installed (or `--registry`) bundles to `bundles.txt` |
-| `hcm import [file]` | Register everything a bundles file lists; `--install` to install too, `--on-conflict` |
+| `hcm import [file]` | Register everything a bundles file lists; `--install` to install too, `-f/--flavor`, `--on-conflict` |
 | `hcm config` | Show settings; `config set\|get\|unset` to change them |
 
 `-t/--target` takes one or more harnesses — by id, alias or unambiguous prefix
@@ -800,6 +914,12 @@ hcm install my-kit --on-conflict prompt     # ask even where hcm would not have
 harnesses it stops being optional; see
 [One folder, several harnesses](#one-folder-several-harnesses) and
 [Several at a time](#several-at-a-time).
+
+`-f/--flavor` takes one or more of the bundle's own flavors, or `all` for the
+whole bundle; omitted, `hcm install` takes all of it and `hcm update` keeps
+whatever was recorded. See [Flavors](#flavors-installing-part-of-a-bundle). Like
+`--target` it is variadic, so bundle names come first:
+`hcm install my-kit --flavor python`, never the other way round.
 
 `<bundle>` accepts a registered **name or id**, a local path, or a GitHub
 reference — so `hcm install 3`, `hcm install ./my-kit` and

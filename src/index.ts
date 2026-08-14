@@ -13,6 +13,15 @@ export {
   trackedBundles,
 } from './core/context.js';
 export { applyPlan } from './core/executor.js';
+export {
+  ALL_FLAVORS,
+  assertFlavorsAvailable,
+  expandFlavors,
+  hasFlavor,
+  inFlavors,
+  matchesPattern,
+  normalizeFlavors,
+} from './core/flavors.js';
 export { buildPlan } from './core/planner.js';
 export { buildRefMap, remapReferences } from './core/refmap.js';
 export {

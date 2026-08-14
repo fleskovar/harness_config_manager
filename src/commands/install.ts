@@ -13,6 +13,14 @@ import {
 } from '../core/deps.js';
 import { ConflictError, HcmError } from '../core/errors.js';
 import { applyPlan } from '../core/executor.js';
+import {
+  ALL_FLAVORS,
+  assertFlavorsAvailable,
+  describeFlavorSelection,
+  expandFlavors,
+  hasFlavor,
+  sameFlavors,
+} from '../core/flavors.js';
 import { describeSource } from '../core/github.js';
 import {
   detectHarnesses,
@@ -59,6 +67,11 @@ export interface InstallOptions {
    * have to be told again.
    */
   targetOptions?: TargetOptions;
+  /**
+   * Install only the bundle's common part plus these flavors, rather than all
+   * of it. Empty or absent is the whole bundle. See `core/flavors.ts`.
+   */
+  flavors?: string[];
   /** Install only what was named, leaving its `dependencies` to fail later. */
   noDeps?: boolean;
   /**
@@ -114,13 +127,24 @@ export async function installCommand(
   // One shared memory of answers for the whole command.
   const decisions = options.decisions ?? new Map<string, Resolution>();
   const chosen = expandTargets(options.targets);
-  options = { ...options, decisions, ...(chosen ? { targets: chosen } : {}) };
+
+  // Checked against the bundles the user named, before anything is planned: a
+  // flavor none of them has would otherwise install their common part and
+  // silently drop the half that was actually wanted.
+  const flavors = expandFlavors(options.flavors) ?? [];
+  assertFlavorsAvailable(roots, flavors);
+
+  options = { ...options, decisions, flavors, ...(chosen ? { targets: chosen } : {}) };
 
   if (roots.length > 1) {
     log.info(
       `${color.bold(String(roots.length))} bundles found: ` +
         roots.map((bundle) => bundle.manifest.name).join(', '),
     );
+  }
+
+  if (flavors.length > 0) {
+    log.info(`Installing the ${color.bold(flavors.join(', '))} flavor(s) and everything common`);
   }
 
   const graph = options.noDeps
@@ -301,6 +325,14 @@ export async function installBundle(
     return;
   }
 
+  // A dependency inherits the run's flavors, and a bundle that has never heard
+  // of them is all common part -- so it arrives whole. Said out loud, because
+  // "--flavor python" reads as if it narrowed everything in the run.
+  const flavors = options.flavors ?? [];
+  if (flavors.length > 0 && !flavors.some((name) => hasFlavor(bundle, name))) {
+    log.info(color.dim(`  no ${flavors.join('/')} flavor here -- installing all of it`));
+  }
+
   for (const targetId of targets) {
     logTargetHeader(targetId, options);
     await installInto(bundle, targetId, options, role);
@@ -328,8 +360,16 @@ export async function installInto(
 ): Promise<void> {
   const target = getTarget(targetId);
   const targetOptions = options.targetOptions ?? {};
-  await warnIfMappingChanged(bundle.manifest.name, targetId, targetOptions, options);
-  const built = await buildPlan(bundle, targetId, options.scope, options.cwd, targetOptions);
+  const flavors = options.flavors ?? [];
+  await warnIfMappingChanged(bundle.manifest.name, targetId, targetOptions, flavors, options);
+  const built = await buildPlan(
+    bundle,
+    targetId,
+    options.scope,
+    options.cwd,
+    targetOptions,
+    flavors,
+  );
 
   if (built.actions.length === 0) {
     log.warn(`  nothing to install (${built.skipped.length} resource(s) not supported here)`);
@@ -391,6 +431,7 @@ export async function installInto(
     installedAt: new Date().toISOString(),
     receipts,
     ...(Object.keys(targetOptions).length > 0 ? { targetOptions } : {}),
+    ...(flavors.length > 0 ? { flavors } : {}),
     ...(role.dependencies?.length ? { dependencies: role.dependencies } : {}),
     ...(auto ? { auto: true } : {}),
   });
@@ -491,14 +532,16 @@ export function describeTargetOptions(options: TargetOptions): string {
 
 /**
  * Installing with different options to last time moves things: a subagent that
- * was a skill becomes an agent file. This install's receipts replace the ones
- * that knew about the old locations, so nothing would ever clean them up --
- * say so, and name the commands that do it properly.
+ * was a skill becomes an agent file. Installing a narrower set of flavors drops
+ * things: yesterday's C# skills are no longer part of the plan. Either way this
+ * install's receipts replace the ones that knew about the old items, so nothing
+ * would ever clean them up -- say so, and name the commands that do it properly.
  */
 async function warnIfMappingChanged(
   bundleName: string,
   targetId: TargetId,
   targetOptions: TargetOptions,
+  flavors: string[],
   options: InstallOptions,
 ): Promise<void> {
   const record = await findInstallation(options.scope, options.cwd, bundleName, targetId);
@@ -506,13 +549,26 @@ async function warnIfMappingChanged(
 
   const before = describeTargetOptions(record.targetOptions ?? {});
   const after = describeTargetOptions(targetOptions);
-  if (before === after) return;
 
-  log.warn(`  installed here with ${before}, now installing with ${after}`);
-  log.warn(
-    '  anything that moves will be left behind at its old path -- ' +
-      `"hcm update ${bundleName}" swaps them over, or uninstall first`,
-  );
+  if (before !== after) {
+    log.warn(`  installed here with ${before}, now installing with ${after}`);
+    log.warn(
+      '  anything that moves will be left behind at its old path -- ' +
+        `"hcm update ${bundleName}" swaps them over, or uninstall first`,
+    );
+  }
+
+  if (!sameFlavors(record.flavors, flavors)) {
+    log.warn(
+      `  installed here as ${describeFlavorSelection(record.flavors)}, ` +
+        `now installing ${describeFlavorSelection(flavors)}`,
+    );
+    log.warn(
+      '  anything dropping out of the selection stays where it is -- ' +
+        `"hcm update ${bundleName} --flavor ${flavors.join(' ') || ALL_FLAVORS}" swaps them over, ` +
+        'or uninstall first',
+    );
+  }
 }
 
 /**

@@ -27,6 +27,13 @@ description: A harness config bundle
 #   - shared-conventions@^1.0.0
 #   - name: jira-board
 #     source: acme/agent-kits/jira-board
+# Subsets users can install on their own ("hcm install ${name} --flavor python").
+# Anything in no flavor is common and installs either way; markdown resources can
+# also tag themselves with "flavors:" in their own frontmatter.
+# flavors:
+#   python:
+#     description: Python tooling
+#     includes: [rules/python.md, mcp/pyright.json]
 `,
 
     'README.md': `# ${name}

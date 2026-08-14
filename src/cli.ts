@@ -33,6 +33,7 @@ import { updateCommand } from './commands/update.js';
 import { validateCommand } from './commands/validate.js';
 import type { ConflictPolicy } from './core/conflicts.js';
 import { ConflictError, HcmError } from './core/errors.js';
+import { ALL_FLAVORS } from './core/flavors.js';
 import { ALL_TARGETS } from './core/harnesses.js';
 import { color, configureLogger, log } from './core/logger.js';
 import { closePrompt } from './core/prompt.js';
@@ -68,10 +69,18 @@ program
     writeErr(str: string) {
       process.stderr.write(str);
       if (!/missing required argument/.test(str)) return;
-      if (!process.argv.slice(2).some((arg) => arg === '-t' || arg === '--target')) return;
+
+      // `--flavor` is variadic for the same reason and swallows names the same
+      // way, so the hint names whichever of the two is on the command line.
+      const variadic = [
+        { flags: ['-t', '--target'], name: '--target', takes: '<harness...>' },
+        { flags: ['-f', '--flavor'], name: '--flavor', takes: '<flavor...>' },
+      ].find((option) => process.argv.slice(2).some((arg) => option.flags.includes(arg)));
+      if (!variadic) return;
+
       process.stderr.write(
-        '--target takes every value after it, so bundle names must come first: ' +
-          'hcm <command> <bundle...> --target <harness...>\n',
+        `${variadic.name} takes every value after it, so bundle names must come first: ` +
+          `hcm <command> <bundle...> ${variadic.name} ${variadic.takes}\n`,
       );
     },
   });
@@ -92,6 +101,21 @@ const targetOption = () =>
   new Option(
     '-t, --target <target...>',
     `target harness(es): ${TARGET_IDS.join(', ')}, or "${ALL_TARGETS}"`,
+  );
+
+/**
+ * Which parts of a bundle to install -- see `core/flavors.ts`.
+ *
+ * Variadic like `--target`, so `--flavor python csharp` is two of them, and
+ * deliberately not `.choices()`: the valid values are the bundle's, not the
+ * CLI's, and `core/flavors.ts` refuses an unknown one against the bundle
+ * actually being installed. `all` is reserved for "the whole bundle", which is
+ * how a narrowed installation is widened again on `hcm update`.
+ */
+const flavorOption = () =>
+  new Option(
+    '-f, --flavor <flavor...>',
+    `install the bundle's common part plus these flavor(s), or "${ALL_FLAVORS}" for all of it`,
   );
 
 /**
@@ -126,6 +150,7 @@ program
   )
   .description('install one or more bundles into one or more harnesses')
   .addOption(targetOption())
+  .addOption(flavorOption())
   .addOption(scopeOption())
   .addOption(conflictOption())
   .option('--dry-run', 'show what would change without writing')
@@ -136,6 +161,7 @@ program
   .action(async (bundles, options) => {
     await installCommand(bundles, {
       targets: options.target,
+      flavors: options.flavor,
       scope: options.scope as Scope,
       dryRun: options.dryRun,
       force: options.force,
@@ -181,6 +207,9 @@ program
   )
   .description('re-read bundles and reinstall them in place (default: everything installed here)')
   .addOption(targetOption())
+  // Omitted, each installation keeps the flavors it recorded; passing it
+  // re-narrows (or, with "all", widens) every installation this run touches.
+  .addOption(flavorOption())
   .addOption(
     new Option('-s, --scope <scope>', 'scopes to update').choices(['project', 'user', 'all']),
   )
@@ -198,6 +227,9 @@ program
       force: options.force,
       onConflict: options.onConflict as ConflictPolicy | undefined,
       ...(options.piSubagents ? { targetOptions: { piSubagents: true } } : {}),
+      // Passed through as given: "not asked for" and "asked for all of it" are
+      // different instructions here, and `updateCommand` tells them apart.
+      ...(options.flavor ? { flavors: options.flavor as string[] } : {}),
       cwd,
     });
   });
@@ -228,10 +260,12 @@ program
   .argument('<bundle...>', 'registered name(s), local path(s), GitHub URL(s), or owner/repo')
   .description('show what bundles contain and where each item would land')
   .addOption(scopeOption())
+  .addOption(flavorOption())
   .addOption(piSubagentsOption())
   .action(async (bundles, options) => {
     await infoCommand(bundles, {
       scope: options.scope as Scope,
+      flavors: options.flavor,
       targetOptions: targetOptionsFrom(options),
       cwd,
     });
@@ -296,6 +330,7 @@ program
   .description('register every bundle listed in a bundles file')
   .option('-i, --install', 'also install each bundle after registering it')
   .addOption(targetOption())
+  .addOption(flavorOption())
   .addOption(scopeOption())
   .addOption(conflictOption())
   .option('--dry-run', 'with --install, show what would change without writing')
@@ -306,6 +341,7 @@ program
     await importCommand(file, {
       install: options.install,
       targets: options.target,
+      flavors: options.flavor,
       scope: options.scope as Scope,
       force: options.force,
       onConflict: options.onConflict as ConflictPolicy | undefined,

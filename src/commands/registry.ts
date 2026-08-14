@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { HcmError } from '../core/errors.js';
+import { flavorNames } from '../core/flavors.js';
 import { ensureDir } from '../core/fsx.js';
 import { describeSource } from '../core/github.js';
 import { color, log } from '../core/logger.js';
@@ -65,6 +66,18 @@ export async function registryAddCommand(
         : `Install them with: hcm install ${ids.join(' ')}`,
     ),
   );
+
+  // A bundle that can be installed in parts is worth saying so about once,
+  // here, rather than leaving it to be discovered in `hcm info`.
+  for (const entry of entries) {
+    if (!entry.flavors?.length) continue;
+    log.info(
+      color.dim(
+        `${color.bold(entry.name)} installs in parts: ${flavorNames(entry.flavors)} — ` +
+          `e.g. hcm install ${entry.id} --flavor ${entry.flavors[0]?.name}`,
+      ),
+    );
+  }
 }
 
 export async function registryRemoveCommand(
@@ -127,6 +140,11 @@ export async function registryListCommand(options: { json?: boolean }): Promise<
         `${color.dim(`v${entry.version ?? '?'}`)}${mode}`,
     );
     log.plain(`  ${' '.repeat(width)}${color.dim(describeSource(entry.source))}`);
+    // What this one can be installed as a part of, which is not something the
+    // name or the source can tell you.
+    if (entry.flavors?.length) {
+      log.plain(`  ${' '.repeat(width)}${color.dim(`flavors: ${flavorNames(entry.flavors)}`)}`);
+    }
   }
 }
 

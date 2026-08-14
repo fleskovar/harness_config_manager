@@ -141,6 +141,8 @@ function probeResource(kind: ResourceKind): BundleResource | undefined {
     files: [],
     frontmatter: { description: 'probe' },
     body: '',
+    // Common, so no flavor selection can filter the probe out from under us.
+    flavors: [],
   };
 
   switch (kind) {

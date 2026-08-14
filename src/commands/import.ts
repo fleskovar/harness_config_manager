@@ -24,6 +24,11 @@ export interface ImportOptions {
   noDeps?: boolean;
   /** With --install, what this machine has; see `TargetOptions`. */
   targetOptions?: TargetOptions;
+  /**
+   * With --install, narrow every bundle in the file to these flavors. Only
+   * usable when they all define them -- see `core/flavors.ts`.
+   */
+  flavors?: string[];
   cwd: string;
 }
 
@@ -83,6 +88,7 @@ export async function importCommand(file: string | undefined, options: ImportOpt
         ...(options.dryRun ? { dryRun: true } : {}),
         ...(options.noDeps ? { noDeps: true } : {}),
         ...(options.targetOptions ? { targetOptions: options.targetOptions } : {}),
+        ...(options.flavors?.length ? { flavors: options.flavors } : {}),
       });
     }
   }

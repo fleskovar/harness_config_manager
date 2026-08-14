@@ -19,6 +19,7 @@ like: `git checkout` puts them back.
 | `bundles/review-kit` | `install-fixtures`, `conflicts-fixtures`, `context-fixtures`, `lifecycle-fixtures` | A healthy bundle: one resource of every kind, with references between them |
 | `bundles/review-kit-v2` | `lifecycle-fixtures` | The same bundle one version on — diff it against `review-kit` |
 | `bundles/broken-refs-kit` | `refs-fixtures` | Four broken references, and a pile of paths that only look broken |
+| `bundles/polyglot-kit` | `flavors` | One kit, two languages: five common resources, five Python, two C# |
 | `bundles/invalid-kit` | `lifecycle-fixtures` | Three mistakes `hcm validate` is supposed to name |
 | `collections/sprint-collection` | `deps-fixtures` | `sprint-kit`, the `team-conventions` it requires, and a skill they both ship |
 | `projects/existing-setup` | `conflicts-fixtures` | A project with its own MCP servers and a hand-written `CLAUDE.md` |
@@ -124,3 +125,29 @@ against the installed file.
 - **Validate.** `bundles/invalid-kit` has a subagent with no description, an MCP
   server with no command, and a subagent and skill sharing the name `helper`.
   Three problems, and `hcm validate` names three.
+
+## Solving the flavors one by hand
+
+```bash
+mkdir /tmp/py && cd /tmp/py
+npx tsx <repo>/src/cli.ts install <repo>/tests/fixtures/bundles/polyglot-kit \
+  --flavor python -t claude-code
+find . -type f
+```
+
+`polyglot-kit` has twelve resources. Before you run it, work out from the bundle
+which of them a Python install writes — its own README is the answer key, but the
+bundle says the same thing in two different places and that is the point of the
+fixture:
+
+- Five resources are tagged in **their own frontmatter** (`flavors: [python]` in
+  `subagents/python-typer.md`, `skills/pytest-runner/SKILL.md`, and the two C#
+  files).
+- Four are tagged **by the manifest**, because `mcp/`, `rules/` and `assets/`
+  files either have no frontmatter or read better named in one place. Note that
+  `includes: assets/python` is a *directory*, and takes `lint.sh` inside it.
+- The remaining five are in no flavor at all, so they install either way.
+
+Then install `--flavor csharp` into another directory and diff the two. The five
+common files should be byte-identical, and `.mcp.json` should not exist at all in
+the C# one — the only MCP server in the kit belongs to the Python flavor.

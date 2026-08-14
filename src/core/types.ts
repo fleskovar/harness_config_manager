@@ -82,6 +82,38 @@ export interface BundleDependency {
   source?: string;
 }
 
+/**
+ * A flavor as it is written down for people: a name, and what it is for.
+ *
+ * This much is stored in the registry, so `hcm registry list` can say what a
+ * bundle can be narrowed to without reading the bundle's files.
+ */
+export interface FlavorSummary {
+  name: string;
+  description?: string;
+}
+
+/**
+ * A flavor as the installer uses it: the summary, plus the bundle-relative path
+ * patterns whose resources belong to it.
+ *
+ * `includes` is how `mcp/`, `settings/` and `assets/` join a flavor -- they have
+ * no frontmatter to write `flavors:` in. Empty when every member declares
+ * itself.
+ */
+export interface FlavorDefinition extends FlavorSummary {
+  includes: string[];
+}
+
+/**
+ * How `flavors:` may be written in a manifest -- names alone, names with a
+ * description, or names with patterns. `normalizeFlavors` turns all three into
+ * `FlavorDefinition[]`.
+ */
+export type FlavorDeclaration =
+  | string[]
+  | Record<string, string | null | { description?: string; includes?: string | string[] }>;
+
 export interface BundleManifest {
   name: string;
   version: string;
@@ -93,6 +125,8 @@ export interface BundleManifest {
   targets?: TargetId[];
   /** Bundles that have to be installed for this one to work. */
   dependencies?: (string | BundleDependency)[];
+  /** Subsets this bundle can be installed as. See `core/flavors.ts`. */
+  flavors?: FlavorDeclaration;
 }
 
 // ---------------------------------------------------------------------------
@@ -109,12 +143,18 @@ export interface BundleResource {
   primaryFile: string;
   /** For skills/assets: every file, with paths relative to the resource root. */
   files: { absolutePath: string; relativePath: string }[];
-  /** Parsed frontmatter, for markdown resources. */
+  /** Parsed frontmatter, for markdown resources. Any `flavors:` is taken out. */
   frontmatter: Record<string, unknown>;
   /** Markdown body, for markdown resources. */
   body?: string;
   /** Parsed payload, for mcp/settings resources. */
   data?: unknown;
+  /**
+   * The flavors this resource belongs to, from its own frontmatter and from the
+   * manifest's patterns. Empty means *common*: it installs whatever was asked
+   * for. See `core/flavors.ts`.
+   */
+  flavors: string[];
 }
 
 export interface LoadedBundle {
@@ -124,6 +164,11 @@ export interface LoadedBundle {
   source: BundleSource;
   /** `manifest.dependencies`, in one shape, validated at load time. */
   dependencies: BundleDependency[];
+  /**
+   * Every flavor this bundle has: what the manifest declares, or -- when it
+   * declares none -- whatever its resources named for themselves.
+   */
+  flavors: FlavorDefinition[];
 }
 
 // ---------------------------------------------------------------------------
@@ -151,6 +196,12 @@ export interface RegistryEntry {
    * be shown without reading every stored bundle from disk.
    */
   dependencies?: BundleDependency[];
+  /**
+   * The subsets it can be installed as, as its manifest had them when it was
+   * registered -- so `hcm registry list` and `hcm list` can offer them without
+   * reading every stored bundle from disk.
+   */
+  flavors?: FlavorSummary[];
   /**
    * Directory name inside the store holding this bundle's files. Absent for
    * `--dev` entries, which are read from `source` in place.
@@ -265,6 +316,12 @@ export interface InstallationRecord {
    * which is what every record written before these existed meant too.
    */
   targetOptions?: TargetOptions;
+  /**
+   * The flavors this installation was narrowed to. Absent means the whole
+   * bundle -- which is what every record written before flavors existed meant.
+   * `hcm update` reinstalls the same subset without being told again.
+   */
+  flavors?: string[];
   /**
    * The bundles this one required, resolved at install time. `hcm uninstall`
    * reads these to know what is still needed, and what has been orphaned.
@@ -400,6 +457,8 @@ export interface InstallPlan {
   scope: Scope;
   /** Carried on the plan so a resolved conflict can regenerate actions the same way. */
   targetOptions: TargetOptions;
+  /** The flavors asked for. Empty is the whole bundle. */
+  flavors: string[];
   /** Absolute root the action paths are relative to. */
   scopeRoot: string;
   actions: PlanAction[];

@@ -1,3 +1,4 @@
+import { flavorNames } from '../core/flavors.js';
 import { describeSource } from '../core/github.js';
 import { color, log } from '../core/logger.js';
 import { readRegistry } from '../core/registry.js';
@@ -58,6 +59,11 @@ async function listAvailable(options: ListOptions): Promise<void> {
     const indent = ' '.repeat(idWidth + 4);
     if (entry.description) log.plain(`${indent}${color.dim(entry.description)}`);
     log.plain(`${indent}${color.dim(describeSource(entry.source))}`);
+    // The parts it can be installed as -- "what can I install?" has a longer
+    // answer than the name for a bundle that offers flavors.
+    if (entry.flavors?.length) {
+      log.plain(`${indent}${color.dim(`flavors: ${flavorNames(entry.flavors)}`)}`);
+    }
   }
 }
 
@@ -94,8 +100,13 @@ async function listInstalled(options: ListOptions): Promise<void> {
       const needs = record.dependencies?.length
         ? color.dim(` · requires ${record.dependencies.map((d) => d.name).join(', ')}`)
         : '';
+      // Part of a bundle rather than all of it: without this the item count is
+      // the only clue, and it is not one anybody can read.
+      const part = record.flavors?.length
+        ? color.yellow(` [${record.flavors.join(', ')}]`)
+        : '';
       log.plain(
-        `  ${color.green('●')} ${color.bold(record.bundle)} ${color.dim(`v${record.version}`)}${why} ` +
+        `  ${color.green('●')} ${color.bold(record.bundle)} ${color.dim(`v${record.version}`)}${why}${part} ` +
           `→ ${record.target} ${color.dim(`· ${record.receipts.length} item(s) · ${when}`)}${needs}`,
       );
     }

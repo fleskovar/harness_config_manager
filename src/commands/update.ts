@@ -23,6 +23,7 @@ import {
   resolveDependencyGraph,
 } from '../core/deps.js';
 import { loadBundle } from '../core/bundle.js';
+import { assertFlavorsAvailable, expandFlavors } from '../core/flavors.js';
 import { expandTargets, requireTargetChoice } from '../core/harnesses.js';
 import { color, log } from '../core/logger.js';
 import { asList, entryDir, readRegistry, refreshEntry, requireEntry } from '../core/registry.js';
@@ -52,6 +53,12 @@ export interface UpdateOptions {
    * version where the old one was, not quietly relocate it.
    */
   targetOptions?: TargetOptions;
+  /**
+   * Overrides the subset each installation recorded. Given nothing, every one
+   * is reinstalled as the same set of flavors it already was -- `--flavor all`
+   * is how you widen a narrowed installation back to the whole bundle.
+   */
+  flavors?: string[];
   cwd: string;
 }
 
@@ -69,6 +76,9 @@ export async function updateCommand(
     ...options,
     decisions: options.decisions ?? new Map<string, Resolution>(),
     ...(chosen ? { targets: chosen } : {}),
+    // Three states, not two: no flag reinstalls what each record says, while
+    // `--flavor all` is an empty selection, meaning the whole bundle.
+    ...(options.flavors === undefined ? {} : { flavors: expandFlavors(options.flavors) ?? [] }),
   };
   await assertTargetChosen(wanted, chosen, options);
   const selection = await select(wanted, options);
@@ -262,6 +272,11 @@ async function updateOne(entry: RegistryEntry, options: UpdateOptions): Promise<
       (updated.dev ? color.yellow(' [dev]') : ''),
   );
 
+  // A `--flavor` this bundle does not have is refused here rather than left to
+  // narrow the install to nothing. `hcm update all` can name bundles that have
+  // no flavors at all, so this only applies where one was asked for.
+  if (options.flavors?.length) assertFlavorsAvailable([bundle], options.flavors);
+
   // Installations are keyed by the manifest name, which `registry add --name`
   // can differ from -- the alias is a registry convenience, not a rename.
   const records = await installedRecords(bundle.manifest.name, options);
@@ -349,6 +364,10 @@ async function installNewDependencies(
           ...(options.onConflict ? { onConflict: options.onConflict } : {}),
           ...(options.decisions ? { decisions: options.decisions } : {}),
           ...(options.targetOptions ? { targetOptions: options.targetOptions } : {}),
+          // A dependency arriving mid-update is narrowed the same way the run
+          // is; one that has no such flavor is all common part, so it comes
+          // whole. See `core/flavors.ts`.
+          ...(options.flavors?.length ? { flavors: options.flavors } : {}),
         },
         {
           auto: true,
@@ -390,8 +409,9 @@ async function reinstall(
       dryRun: options.dryRun ?? false,
       force: options.force ?? false,
       // What was recorded, unless this run says otherwise -- so `hcm update` puts
-      // the new version exactly where the old one was.
+      // the new version exactly where the old one was, and no more of it.
       targetOptions: options.targetOptions ?? record.targetOptions ?? {},
+      flavors: options.flavors ?? record.flavors ?? [],
       ...(options.onConflict ? { onConflict: options.onConflict } : {}),
       ...(options.decisions ? { decisions: options.decisions } : {}),
     },
