@@ -39,6 +39,9 @@ dependencies:                     # optional; see below
   - jira-board@^1.2.0
 flavors:                          # optional; subsets, see below
   python: Python tooling
+parameters:                       # optional; values asked for at install, see below
+  AGENT_NAME:
+    default: Claude
 ```
 
 Set `targets` only when a bundle genuinely does not make sense elsewhere.
@@ -179,6 +182,163 @@ Two things to keep in mind while dividing a kit up:
   per-bundle. Reach for a flavor when the pieces genuinely share a common half
   and a version number; reach for a
   [collection](#shipping-several-bundles-together) when they do not.
+
+## Parameters: finishing the kit at install time
+
+Some of what a bundle says is different in every project it lands in — the
+agent's name, the team that owns the code, the ticket prefix. Hard-coding those
+means one bundle per project; leaving them out means vague instructions. A
+*parameter* is the third option: you name the hole, and the install fills it.
+
+```yaml
+# hcm.yaml
+parameters:
+  AGENT_NAME:
+    description: What the agent should call itself
+    default: Claude
+  TEAM:
+    description: The team that owns this project
+```
+
+```markdown
+<!-- context/10-identity.md -->
+You are a coding agent called <%AGENT_NAME%>, working for the <%TEAM%> team.
+```
+
+```bash
+hcm install ./my-kit --param TEAM=Platform --param AGENT_NAME=Ada
+```
+
+and the installed `CLAUDE.md` reads *You are a coding agent called Ada, working
+for the Platform team.*
+
+### Where placeholders work
+
+`<%NAME%>` is filled in everywhere the text of an installed item can hold one:
+
+- markdown bodies, and the frontmatter above them
+- context sections, as they go into `CLAUDE.md` / `AGENTS.md` / friends
+- a skill's `SKILL.md` **and** the supporting files beside it
+- the string values inside `mcp/*.json` and `settings/settings.json`
+- assets, when they are text — a shell script yes, a PNG no
+
+It is **never** applied to a path. Where a file lands is a fact about your
+bundle's layout, not about one install, so a `name:` in frontmatter holding a
+placeholder is a mistake `hcm validate` reports rather than a filename it
+invents.
+
+Spaces inside the delimiters are fine (`<% NAME %>`). Anything that is not
+simply a name between them is left alone, so a file carrying another template
+language's `<% if user.admin %>` survives untouched. To write a literal
+placeholder — documenting this feature, say — double the first `%`:
+`<%%NAME%>` installs as `<%NAME%>`.
+
+### Declaring one
+
+Three spellings, exactly as `flavors:` has:
+
+```yaml
+parameters: [AGENT_NAME, TEAM]          # names alone, each one required
+
+parameters:
+  AGENT_NAME: What it calls itself      # name with a description
+
+parameters:
+  AGENT_NAME:                           # name with the full shape
+    description: What it calls itself
+    default: Claude                     # also the prompt's suggestion
+    required: false                     # defaults to true when there is no default
+    choices: [Claude, Codey]            # turns the prompt into a menu
+    pattern: '^[A-Za-z ]+$'             # a regular expression the value must match
+    secret: false                       # true: used, but never recorded
+    flavors: [python]                   # only asked for with --flavor python
+    targets: [claude-code]              # only asked for in that harness
+```
+
+A parameter with a `default` is not one an install has to be told, so the
+shortest useful bundle asks nothing at all and still customises cleanly.
+
+### Global, per-flavor and per-harness
+
+Naming neither `flavors` nor `targets` makes a parameter **global**: every
+install answers it. Naming either narrows *what is asked for*:
+
+| Declaration | Asked for |
+| --- | --- |
+| neither | always |
+| `flavors: [python]` | when `--flavor python` is installed (or no `--flavor` at all) |
+| `targets: [claude-code]` | when installing into Claude Code |
+
+Narrowing changes what is **asked**, not what is **substituted**. A parameter
+scoped to Claude Code still has a default, and a file every harness gets that
+mentions it reads as that default in the others. Only a narrowed parameter with
+*no default* leaves a real hole elsewhere — and `hcm validate` reports exactly
+that case, so you find out before your users do.
+
+A harness-scoped parameter is also asked once per harness rather than once per
+bundle, which is how one name takes a different value in each:
+
+```bash
+hcm install my-kit -t claude-code copilot \
+  --param my-kit@claude-code:AGENT_NAME=Ada \
+  --param my-kit@copilot:AGENT_NAME=Cop
+```
+
+### Secrets
+
+`secret: true` means the value is used but never written to the installation
+ledger — which for project scope is `.hcm/state.json`, a file people commit.
+The trade is that `hcm update` cannot reuse it, so it has to be supplied again:
+
+```bash
+hcm update my-kit --param API_TOKEN="$TOKEN"
+```
+
+### What your users will do
+
+Every parameter can be answered four ways, so a bundle that asks for things is
+still installable from a script:
+
+```bash
+hcm install my-kit --param TEAM=Platform        # a flag
+hcm install my-kit --params-file team.yaml      # a file, committable
+HCM_PARAM_TEAM=Platform hcm install my-kit      # the environment, for CI
+hcm install my-kit                              # answering when asked
+```
+
+With no terminal and no value supplied, a required parameter stops the run
+rather than installing something half-written. `hcm install --no-prompt` asks
+for that behaviour deliberately.
+
+Nobody has to work out what belongs in that file by reading your manifest —
+`hcm params init <bundle>` writes it, one commented entry per parameter, with
+every value it can already work out filled in and the rest left blank:
+
+```bash
+hcm params init my-kit          # writes params.yaml
+$EDITOR params.yaml             # fill in the blanks
+hcm install my-kit --params-file params.yaml
+```
+
+Two things follow for you as an author. A `description` is not decoration — it
+is the comment above the blank, and it is the only place a user finds out what
+the value is *for*. And a parameter with no `default` is the one that shows up
+as `# REQUIRED — no default`, so give a default to everything that can sensibly
+have one and leave it off only where a wrong guess would be worse than a stop.
+
+The values are recorded with the installation, so `hcm update` renders the new
+version with the same ones without being told again — an update that quietly
+renamed the agent would be worse than no update at all. `hcm params` shows what
+each installation holds.
+
+### Keeping them honest
+
+`hcm validate` reports the four mistakes that would otherwise ship:
+
+- a `<%PLACEHOLDER%>` naming a parameter you never declared
+- a parameter declared and never used
+- a narrowed parameter with no default, used where it is not asked for
+- a placeholder in a `name:`, which decides a filename and is never substituted
 
 ## Writing each resource kind
 

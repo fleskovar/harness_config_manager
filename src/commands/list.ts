@@ -1,4 +1,5 @@
 import { flavorNames } from '../core/flavors.js';
+import { parameterNames } from '../core/parameters.js';
 import { describeSource } from '../core/github.js';
 import { color, log } from '../core/logger.js';
 import { readRegistry } from '../core/registry.js';
@@ -64,6 +65,10 @@ async function listAvailable(options: ListOptions): Promise<void> {
     if (entry.flavors?.length) {
       log.plain(`${indent}${color.dim(`flavors: ${flavorNames(entry.flavors)}`)}`);
     }
+    // And what installing it will ask for, for the same reason.
+    if (entry.parameters?.length) {
+      log.plain(`${indent}${color.dim(`parameters: ${parameterNames(entry.parameters)}`)}`);
+    }
   }
 }
 
@@ -109,6 +114,16 @@ async function listInstalled(options: ListOptions): Promise<void> {
         `  ${color.green('●')} ${color.bold(record.bundle)} ${color.dim(`v${record.version}`)}${why}${part} ` +
           `→ ${record.target} ${color.dim(`· ${record.receipts.length} item(s) · ${when}`)}${needs}`,
       );
+      // The values its templates were rendered with, and what `hcm update`
+      // will render the next version with unless it is told otherwise.
+      const parameters = Object.entries(record.parameters ?? {});
+      if (parameters.length > 0) {
+        log.plain(
+          color.dim(
+            `      ${parameters.map(([name, value]) => `${name}=${value}`).join('  ')}`,
+          ),
+        );
+      }
     }
   }
 }

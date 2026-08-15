@@ -8,6 +8,7 @@
 
 import { inFlavors } from './flavors.js';
 import { fromPosix, readBytesIfExists, readTextIfExists } from './fsx.js';
+import { applicableParameters, applyParameters } from './parameters.js';
 import { hashValue, sha256 } from './hash.js';
 import { remapReferences } from './refmap.js';
 import { getTarget } from '../targets/index.js';
@@ -22,6 +23,7 @@ import type {
   BundleResource,
   InstallPlan,
   LoadedBundle,
+  ParameterValues,
   PlanAction,
   PlanConflict,
   Receipt,
@@ -37,6 +39,7 @@ export async function buildPlan(
   cwd: string,
   targetOptions: TargetOptions = {},
   flavors: string[] = [],
+  parameters: ParameterValues = {},
 ): Promise<InstallPlan> {
   const target = getTarget(targetId);
   const scopeRoot = target.scopeRoot(scope, cwd);
@@ -81,7 +84,23 @@ export async function buildPlan(
   // at where the files are actually going. Before conflict detection, so that
   // hashes, receipts and --dry-run all describe the text that will be on disk.
   const remap = remapReferences(bundle, actions);
-  const conflicts = await detectConflicts(remap.actions, scopeRoot, bundle.manifest.name, cwd);
+
+  // Then the parameters, for the same reason and in the same place: what is
+  // hashed, compared and recorded has to be the text that lands. After the
+  // remapper, because where a file goes is decided by the bundle's layout and
+  // never by a value somebody typed at install time.
+  const templated = applyParameters(
+    remap.actions,
+    parameters,
+    applicableParameters(bundle.parameters, { target: targetId, flavors }),
+  );
+
+  const conflicts = await detectConflicts(
+    templated.actions,
+    scopeRoot,
+    bundle.manifest.name,
+    cwd,
+  );
 
   return {
     bundle,
@@ -89,8 +108,13 @@ export async function buildPlan(
     scope,
     targetOptions,
     flavors,
+    templating: {
+      values: parameters,
+      substituted: templated.substituted,
+      unresolved: templated.unresolved,
+    },
     scopeRoot,
-    actions: remap.actions,
+    actions: templated.actions,
     conflicts,
     skipped,
     references: { rewrites: remap.rewrites, dropped: remap.dropped },

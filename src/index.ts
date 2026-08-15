@@ -22,6 +22,25 @@ export {
   matchesPattern,
   normalizeFlavors,
 } from './core/flavors.js';
+export {
+  applicableParameters,
+  appliesTo,
+  applyParameters,
+  emptyOverrides,
+  mergeOverrides,
+  normalizeParameters,
+  overridesFor,
+  parameterEnvName,
+  parameterProblems,
+  parseAssignments,
+  placeholderNames,
+  readParametersFile,
+  renderTemplate,
+  resolveParameters,
+  storableValues,
+  summarizeParameters,
+  withDefaults,
+} from './core/parameters.js';
 export { buildPlan } from './core/planner.js';
 export { buildRefMap, remapReferences } from './core/refmap.js';
 export {

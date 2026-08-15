@@ -23,6 +23,7 @@ import { HcmError } from './errors.js';
 import { attachFlavors, flavorProblems, normalizeFlavors } from './flavors.js';
 import { parseMarkdown } from './frontmatter.js';
 import { fs, isDirectory, listFiles, pathExists, toPosix } from './fsx.js';
+import { normalizeParameters, parameterProblems } from './parameters.js';
 import { isValidRange } from './semver.js';
 import {
   type BundleDependency,
@@ -70,11 +71,12 @@ export async function loadManifest(root: string): Promise<BundleManifest> {
     );
   }
 
-  // Parsed here so a malformed dependency or flavor is reported against the
-  // manifest it is written in, rather than at install time against whoever
-  // required it.
+  // Parsed here so a malformed dependency, flavor or parameter is reported
+  // against the manifest it is written in, rather than at install time against
+  // whoever required it.
   normalizeDependencies(manifest, manifestPath);
   normalizeFlavors(manifest, manifestPath);
+  normalizeParameters(manifest, manifestPath);
 
   return manifest;
 }
@@ -234,6 +236,7 @@ export async function loadBundle(root: string, source?: BundleSource): Promise<L
     // Tags each resource as it goes, and strips the `flavors:` frontmatter so
     // it never reaches an installed file.
     flavors: attachFlavors(sorted, normalizeFlavors(manifest)),
+    parameters: normalizeParameters(manifest),
   };
 }
 
@@ -383,6 +386,7 @@ export function validateBundle(bundle: LoadedBundle): string[] {
   }
 
   problems.push(...flavorProblems(bundle));
+  problems.push(...parameterProblems(bundle));
 
   // On Reasonix and Pi a subagent is a Skill, so the two kinds share one
   // namespace -- Reasonix itself refuses a profile whose name belongs to

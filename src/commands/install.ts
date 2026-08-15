@@ -31,6 +31,18 @@ import {
 } from '../core/harnesses.js';
 import { color, log } from '../core/logger.js';
 import { describeReaders, sharedFileNotices } from '../core/overlap.js';
+import {
+  applicableParameters,
+  emptyOverrides,
+  mergeOverrides,
+  overridesFor,
+  type ParameterOverrides,
+  parseAssignments,
+  readParametersFile,
+  resolveParameters,
+  storableValues,
+  withDefaults,
+} from '../core/parameters.js';
 import { buildPlan } from '../core/planner.js';
 import { asList, resolveBundles } from '../core/registry.js';
 import { findInstallation, upsertInstallation } from '../core/state.js';
@@ -38,7 +50,9 @@ import {
   installationId,
   type InstalledDependency,
   type LoadedBundle,
+  type ParameterValues,
   type PlanReferences,
+  type PlanTemplating,
   type Scope,
   type TargetId,
   type TargetOptions,
@@ -72,6 +86,34 @@ export interface InstallOptions {
    * of it. Empty or absent is the whole bundle. See `core/flavors.ts`.
    */
   flavors?: string[];
+  /**
+   * `--param` assignments, as typed: `NAME=value`, `bundle:NAME=value` or
+   * `bundle@harness:NAME=value`. See `core/parameters.ts`.
+   */
+  params?: string[];
+  /** `--params-file`: files of parameter values, later ones winning. */
+  paramsFiles?: string[];
+  /** Already-parsed overrides, for callers that are not a command line. */
+  parameterOverrides?: ParameterOverrides;
+  /**
+   * Values a previous installation was rendered with, reused unless something
+   * overrides them. `hcm update` passes these: it rolls the old installation
+   * back before reinstalling, so by then there is no record left to read.
+   */
+  recordedParameters?: ParameterValues;
+  /**
+   * Ask for missing parameter values when there is a terminal. False never
+   * asks: defaults are used, and a required value with no default is an error.
+   */
+  prompt?: boolean;
+  /** Ask again for values a previous install recorded. */
+  reconfigure?: boolean;
+  /**
+   * Parameter answers remembered across bundles and targets in one run, so
+   * installing into three harnesses asks each question once. Created here when
+   * absent, like `decisions`.
+   */
+  answers?: Map<string, string>;
   /** Install only what was named, leaving its `dependencies` to fail later. */
   noDeps?: boolean;
   /**
@@ -124,9 +166,15 @@ export async function installCommand(
     );
   }
 
-  // One shared memory of answers for the whole command.
+  // One shared memory of answers for the whole command -- conflict decisions,
+  // and the parameter values typed at the prompt.
   const decisions = options.decisions ?? new Map<string, Resolution>();
+  const answers = options.answers ?? new Map<string, string>();
   const chosen = expandTargets(options.targets);
+
+  // Read before anything is planned, so a malformed assignment or a missing
+  // file stops the run rather than the second bundle of five.
+  const parameterOverrides = await collectOverrides(options);
 
   // Checked against the bundles the user named, before anything is planned: a
   // flavor none of them has would otherwise install their common part and
@@ -134,7 +182,14 @@ export async function installCommand(
   const flavors = expandFlavors(options.flavors) ?? [];
   assertFlavorsAvailable(roots, flavors);
 
-  options = { ...options, decisions, flavors, ...(chosen ? { targets: chosen } : {}) };
+  options = {
+    ...options,
+    decisions,
+    answers,
+    parameterOverrides,
+    flavors,
+    ...(chosen ? { targets: chosen } : {}),
+  };
 
   if (roots.length > 1) {
     log.info(
@@ -362,6 +417,11 @@ export async function installInto(
   const targetOptions = options.targetOptions ?? {};
   const flavors = options.flavors ?? [];
   await warnIfMappingChanged(bundle.manifest.name, targetId, targetOptions, flavors, options);
+
+  // Asked before the plan is built, because the plan is the rendered text: a
+  // value arriving later would leave the hashes describing something else.
+  const parameters = await askParameters(bundle, targetId, flavors, options);
+
   const built = await buildPlan(
     bundle,
     targetId,
@@ -369,6 +429,7 @@ export async function installInto(
     options.cwd,
     targetOptions,
     flavors,
+    parameters.values,
   );
 
   if (built.actions.length === 0) {
@@ -397,6 +458,7 @@ export async function installInto(
   }
 
   reportReferences(plan);
+  reportTemplating(plan.templating);
   await reportSharedFiles(plan.actions.map((action) => action.path), targetId, options);
 
   for (const action of plan.actions) {
@@ -432,6 +494,9 @@ export async function installInto(
     receipts,
     ...(Object.keys(targetOptions).length > 0 ? { targetOptions } : {}),
     ...(flavors.length > 0 ? { flavors } : {}),
+    // Everything except the secrets, so `hcm update` can render the new version
+    // the same way without being told again.
+    ...(Object.keys(parameters.stored).length > 0 ? { parameters: parameters.stored } : {}),
     ...(role.dependencies?.length ? { dependencies: role.dependencies } : {}),
     ...(auto ? { auto: true } : {}),
   });
@@ -453,6 +518,115 @@ export async function installInto(
   );
   if (cached > 0) {
     log.debug(`cached ${cached} context section(s) for "hcm context append"`);
+  }
+}
+
+/**
+ * Everything `--param` and `--params-file` said, in one place.
+ *
+ * Files first, flags second, so a flag beats the file it sits beside -- the
+ * usual reading of "the file is the setting, the flag is the exception". Two
+ * files are merged in the order given, the later one winning.
+ */
+async function collectOverrides(options: InstallOptions): Promise<ParameterOverrides> {
+  const fromFiles: ParameterOverrides[] = [];
+  for (const file of options.paramsFiles ?? []) {
+    fromFiles.push(await readParametersFile(file, options.cwd));
+  }
+
+  return mergeOverrides(
+    options.parameterOverrides ?? emptyOverrides(),
+    ...fromFiles,
+    parseAssignments(options.params),
+  );
+}
+
+/** What one installation's templates should be rendered with, and what to record. */
+interface InstallParameters {
+  values: ParameterValues;
+  /** The subset safe to write into the ledger -- see `storableValues`. */
+  stored: ParameterValues;
+}
+
+/**
+ * Settle every parameter this installation needs.
+ *
+ * The values a previous install of the same bundle into the same harness
+ * recorded are the starting point, so reinstalling asks nothing and changes
+ * nothing. `hcm update` cannot rely on that -- it rolls the old installation
+ * back first -- so it hands them over itself.
+ */
+async function askParameters(
+  bundle: LoadedBundle,
+  targetId: TargetId,
+  flavors: string[],
+  options: InstallOptions,
+): Promise<InstallParameters> {
+  if (bundle.parameters.length === 0) return { values: {}, stored: {} };
+  const applicable = applicableParameters(bundle.parameters, { target: targetId, flavors });
+
+  const recorded =
+    options.recordedParameters ??
+    (await findInstallation(options.scope, options.cwd, bundle.manifest.name, targetId))
+      ?.parameters;
+
+  const resolved = await resolveParameters({
+    bundle: bundle.manifest.name,
+    target: targetId,
+    parameters: applicable,
+    overrides: overridesFor(
+      options.parameterOverrides ?? emptyOverrides(),
+      bundle.manifest.name,
+      targetId,
+    ),
+    ...(recorded ? { recorded } : {}),
+    session: options.answers ?? new Map<string, string>(),
+    ...(options.prompt === false ? { prompt: false } : {}),
+    ...(options.reconfigure ? { reconfigure: true } : {}),
+  });
+
+  for (const parameter of applicable) {
+    const value = resolved.values[parameter.name] ?? '';
+    const shown = parameter.secret ? color.dim('(hidden)') : JSON.stringify(value);
+    log.debug(`${parameter.name} = ${shown} (${resolved.sources[parameter.name]})`);
+  }
+
+  return {
+    // What is rendered includes a default for anything narrowed away, so a
+    // file common to every harness never carries a hole; what is *recorded* is
+    // only what this install actually settled, since a default belongs to the
+    // manifest and should move with it.
+    values: withDefaults(resolved.values, bundle.parameters),
+    stored: storableValues(resolved.values, applicable),
+  };
+}
+
+/**
+ * What the parameter renderer did.
+ *
+ * Substitutions are routine -- one line, only with `--verbose`. A placeholder
+ * left standing is not: it goes into the installed file exactly as written, and
+ * the agent reads `<%AGENT_NAME%>` out loud. That is worth a warning every time.
+ */
+function reportTemplating(templating: PlanTemplating | undefined): void {
+  if (!templating) return;
+
+  for (const filled of templating.substituted) {
+    log.debug(`${filled.path}: <%${filled.name}%> ×${filled.count}`);
+  }
+  if (templating.substituted.length > 0) {
+    const files = new Set(templating.substituted.map((filled) => filled.path)).size;
+    const names = new Set(templating.substituted.map((filled) => filled.name)).size;
+    log.debug(`filled in ${names} parameter(s) across ${files} file(s)`);
+  }
+
+  // One warning per name and file, however many times it appears in it.
+  const seen = new Set<string>();
+  for (const miss of templating.unresolved) {
+    const key = `${miss.path}::${miss.name}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    log.warn(`  ${miss.path}: "<%${miss.name}%>" ${miss.reason}; it installs verbatim`);
   }
 }
 

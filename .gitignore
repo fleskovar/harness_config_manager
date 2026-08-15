@@ -5,3 +5,4 @@ dist/
 .hcm/
 coverage/
 .DS_Store
+.claude

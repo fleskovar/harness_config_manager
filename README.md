@@ -85,6 +85,10 @@ dependencies:
 # Subsets it can be installed as. See "Flavors" below.
 flavors:
   python: Python tooling
+# Values filled into its files at install time. See "Parameters" below.
+parameters:
+  AGENT_NAME:
+    default: Claude
 ```
 
 ## Where things land
@@ -530,6 +534,162 @@ with no flavors is entirely common — so one that has never heard of `python`
 arrives whole, and one that happens to share the flavor is narrowed the same way
 its dependent was. `hcm install` says which happened.
 
+## Parameters: values filled in at install time
+
+A bundle is written once and installed into many projects, and some of what it
+says is different in each of them — the agent's name, the team that owns the
+code, the ticket prefix. Writing those into the bundle means one bundle per
+project; leaving them out means the instructions are vague. A **parameter** is
+the third option: the bundle names the hole, the install fills it.
+
+```yaml
+# hcm.yaml
+parameters:
+  AGENT_NAME:
+    description: What the agent should call itself
+    default: Claude
+  TEAM:
+    description: The team that owns this project
+```
+
+```markdown
+<!-- context/10-identity.md -->
+You are a coding agent called <%AGENT_NAME%>, working for the <%TEAM%> team.
+```
+
+```bash
+hcm install my-kit --param TEAM=Platform --param AGENT_NAME=Ada
+```
+
+and the `CLAUDE.md` block reads *You are a coding agent called Ada, working for
+the Platform team.*
+
+Placeholders are filled in wherever the text of an installed item can hold one:
+markdown bodies and their frontmatter, context sections, a skill's `SKILL.md`
+**and** the files beside it, the string values inside MCP and settings
+fragments, and any asset that is text. Never in a *path* — where a file lands is
+a fact about the bundle, not about one install.
+
+Substitution happens on the **plan**, after references are remapped and before
+anything is compared against disk. So the hashes, the receipts, `--dry-run`,
+`hcm info` and the cached context sections all describe the text that will
+really be there — and rollback stays exact, because what was claimed is what was
+written.
+
+### Three kinds of parameter
+
+| Declaration | Asked for |
+| --- | --- |
+| neither `flavors` nor `targets` | **global** — every install |
+| `flavors: [python]` | when that flavor is installed (or no `--flavor` at all) |
+| `targets: [claude-code]` | when installing into that harness |
+
+Narrowing changes what is **asked**, not what is **substituted**. A parameter
+scoped to Claude Code still has a default, and a file every harness gets that
+mentions it reads as that default in the others — so narrowing never puts a hole
+in a common file. Only a narrowed parameter with *no default* can, and
+`hcm validate` reports exactly that.
+
+A harness-scoped parameter is asked once per harness rather than once per
+bundle, which is how one name takes a different value in each:
+
+```bash
+hcm install my-kit -t claude-code copilot \
+  --param my-kit@claude-code:AGENT_NAME=Ada \
+  --param my-kit@copilot:AGENT_NAME=Cop
+```
+
+### Four ways to answer
+
+```bash
+hcm install my-kit --param TEAM=Platform        # a flag
+hcm install my-kit --params-file team.yaml      # a file, committable
+HCM_PARAM_TEAM=Platform hcm install my-kit      # the environment, for CI
+hcm install my-kit                              # answering when asked
+```
+
+Checked in that order, then this run's earlier answers, then what a previous
+install recorded — and only when all of those are silent is anybody asked. So a
+scripted run never blocks, an interactive one never repeats itself, and nothing
+changes an answer behind your back. With no terminal and nothing supplied, a
+required parameter stops the run rather than installing something half-written;
+`--no-prompt` asks for that behaviour deliberately.
+
+A parameters file scopes the same three ways the flag does:
+
+```yaml
+# team.yaml
+TEAM: Platform                # any bundle that asks for it
+bundles:
+  my-kit:
+    AGENT_NAME: Ada           # this bundle
+    targets:
+      copilot:
+        AGENT_NAME: Cop       # this bundle, in Copilot
+```
+
+You do not have to write it by hand. `hcm params init` asks the bundles what
+they want and writes the file for you to fill in:
+
+```bash
+hcm params init my-kit          # writes params.yaml
+$EDITOR params.yaml             # fill in the blanks
+hcm install my-kit --params-file params.yaml
+```
+
+Every question appears with what it is for, whether it has to be answered, and
+what it will accept — with the answer already filled in wherever hcm can work
+one out, so only the genuinely unknown values are left blank:
+
+```yaml
+bundles:
+  my-kit:
+    # What the agent should call itself
+    AGENT_NAME: Claude
+    # The team that owns this project
+    # REQUIRED — no default
+    TEAM:
+    # Token for the reporting service
+    # secret — never recorded, so it must be given every time
+    API_TOKEN:
+    targets:
+      claude-code:
+        # The model this project prefers
+        CLAUDE_MODEL: sonnet
+```
+
+A blank key means *not said* — hcm falls back to the default or asks, exactly as
+if the key were absent, so a half-finished file is never a broken one. Write
+`KEY: ""` to mean the value really is empty.
+
+Name no bundles and it writes down what this project is **already** installed
+as, values and all:
+
+```bash
+hcm params init                 # prefilled from the installation ledger
+```
+
+That file, committed or handed to a colleague, reproduces the setup on a fresh
+checkout — with the exception of anything declared `secret`, which was never
+recorded and is left blank on purpose.
+
+### Remembered for `hcm update`
+
+The values are recorded with the installation, so the next version is rendered
+with the same ones without being told again — an update that silently renamed
+the agent would be worse than no update at all.
+
+```bash
+hcm params                                  # what each installation holds
+hcm update my-kit                           # new version, same values
+hcm update my-kit --param AGENT_NAME=Grace  # change one, keep the rest
+hcm update my-kit --reconfigure             # ask for all of them again
+```
+
+A parameter declared `secret: true` is used but never written to the ledger —
+project scope keeps that in `.hcm/state.json`, a file people commit. The trade
+is that an update has to be given it again.
+
 ## Shared items: written once, claimed by everyone who needs them
 
 Two bundles will often want the very same thing: a dependency's skill that its
@@ -885,12 +1045,14 @@ hcm install my-kit --on-conflict prompt     # ask even where hcm would not have
 
 | Command | What it does |
 | --- | --- |
-| `hcm install <bundle...>` | Install, with whatever it requires. `-t/--target`, `-f/--flavor`, `-s/--scope`, `--dry-run`, `--force`, `--on-conflict`, `--refresh`, `--no-deps`, `--pi-subagents` |
-| `hcm update [<bundle...>\|all]` | Re-read bundles and reinstall them in place. No argument: everything installed here; `all`: everything registered. `-t`, `-f`, `-s`, `--dry-run`, `--force`, `--on-conflict`, `--pi-subagents` |
+| `hcm install <bundle...>` | Install, with whatever it requires. `-t/--target`, `-f/--flavor`, `-s/--scope`, `--param`, `--params-file`, `--no-prompt`, `--dry-run`, `--force`, `--on-conflict`, `--refresh`, `--no-deps`, `--pi-subagents` |
+| `hcm update [<bundle...>\|all]` | Re-read bundles and reinstall them in place. No argument: everything installed here; `all`: everything registered. `-t`, `-f`, `-s`, `--param`, `--params-file`, `--reconfigure`, `--no-prompt`, `--dry-run`, `--force`, `--on-conflict`, `--pi-subagents` |
 | `hcm uninstall <bundle...>` | Remove exactly what was installed. `-t`, `-s`, `--dry-run`, `--force`, `--cascade`, `--ignore-dependents`, `--keep-orphans` |
 | `hcm list` | Registered bundles (`●` = installed somewhere) |
 | `hcm list --installed` | Installed bundles. `--scope project\|user\|all`, `--json` |
-| `hcm info <bundle...>` | Contents, its flavors, plus where every item would land in each target. `-f/--flavor`, `--pi-subagents` |
+| `hcm info <bundle...>` | Contents, its flavors and parameters, plus where every item would land in each target. `-f/--flavor`, `--param`, `--params-file`, `--pi-subagents` |
+| `hcm params [list] [bundle...]` | The parameter values each installation was rendered with. `-t`, `-s`, `--json` |
+| `hcm params init [bundle...]` | Write a parameters file to fill in and pass back with `--params-file`. Omit the bundles for everything installed here. `-t`, `-f`, `-s`, `-o/--output`, `--stdout`, `--force` |
 | `hcm status` | Which harnesses this folder uses, then whether installed items are still present and unmodified |
 | `hcm context [list]` | Tracked context sections, and whether each is still in its file. `--json` |
 | `hcm context append [bundle...]` | Add back the sections that have gone missing. `-t`, `-s`, `--dry-run`, `--force` |
@@ -906,7 +1068,7 @@ hcm install my-kit --on-conflict prompt     # ask even where hcm would not have
 | `hcm registry open [bundle]` | Print — and open — where registered bundles are stored |
 | `hcm registry list` | List registered bundles with their ids |
 | `hcm export [file]` | Write installed (or `--registry`) bundles to `bundles.txt` |
-| `hcm import [file]` | Register everything a bundles file lists; `--install` to install too, `-f/--flavor`, `--on-conflict` |
+| `hcm import [file]` | Register everything a bundles file lists; `--install` to install too, `-f/--flavor`, `--param`, `--params-file`, `--on-conflict` |
 | `hcm config` | Show settings; `config set\|get\|unset` to change them |
 
 `-t/--target` takes one or more harnesses — by id, alias or unambiguous prefix
@@ -920,6 +1082,12 @@ whole bundle; omitted, `hcm install` takes all of it and `hcm update` keeps
 whatever was recorded. See [Flavors](#flavors-installing-part-of-a-bundle). Like
 `--target` it is variadic, so bundle names come first:
 `hcm install my-kit --flavor python`, never the other way round.
+
+`--param` takes one `NAME=value` at a time and may be repeated, optionally
+scoped to a bundle (`my-kit:NAME=value`) or to a bundle in one harness
+(`my-kit@copilot:NAME=value`). Unlike `--target` and `--flavor` it is not
+variadic, so it never swallows the bundle names after it. See
+[Parameters](#parameters-values-filled-in-at-install-time).
 
 `<bundle>` accepts a registered **name or id**, a local path, or a GitHub
 reference — so `hcm install 3`, `hcm install ./my-kit` and

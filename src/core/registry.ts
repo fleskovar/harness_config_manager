@@ -11,6 +11,7 @@ import path from 'node:path';
 import { discoverBundleDirs, loadBundle } from './bundle.js';
 import { HcmError } from './errors.js';
 import { summarizeFlavors } from './flavors.js';
+import { summarizeParameters } from './parameters.js';
 import { isDirectory, readJsonIfExists, toPosix, writeJson } from './fsx.js';
 import { describeSource, parseGithubSource, resolveSource } from './github.js';
 import { registryFile } from './paths.js';
@@ -209,6 +210,9 @@ export async function addToRegistry(
       ...(bundle.manifest.tags ? { tags: bundle.manifest.tags } : {}),
       ...(bundle.dependencies.length > 0 ? { dependencies: bundle.dependencies } : {}),
       ...(bundle.flavors.length > 0 ? { flavors: summarizeFlavors(bundle.flavors) } : {}),
+      ...(bundle.parameters.length > 0
+        ? { parameters: summarizeParameters(bundle.parameters) }
+        : {}),
       ...(options.dev ? { dev: true } : { store: storeSlug({ id, name }) }),
       addedAt: existing?.addedAt ?? new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -289,6 +293,9 @@ async function persistRefresh(
     // Replaced wholesale, so a dependency dropped upstream disappears here too.
     ...(bundle.dependencies.length > 0 ? { dependencies: bundle.dependencies } : {}),
     ...(bundle.flavors.length > 0 ? { flavors: summarizeFlavors(bundle.flavors) } : {}),
+    ...(bundle.parameters.length > 0
+      ? { parameters: summarizeParameters(bundle.parameters) }
+      : {}),
     ...(entry.dev ? {} : { store: entry.store ?? storeSlug(entry) }),
     updatedAt: new Date().toISOString(),
   };
@@ -297,6 +304,7 @@ async function persistRefresh(
   // and the same for a flavor dropped upstream.
   if (bundle.dependencies.length === 0) delete updated.dependencies;
   if (bundle.flavors.length === 0) delete updated.flavors;
+  if (bundle.parameters.length === 0) delete updated.parameters;
 
   const index = registry.entries.indexOf(current);
   if (index >= 0) registry.entries[index] = updated;

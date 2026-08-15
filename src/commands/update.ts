@@ -26,6 +26,13 @@ import { loadBundle } from '../core/bundle.js';
 import { assertFlavorsAvailable, expandFlavors } from '../core/flavors.js';
 import { expandTargets, requireTargetChoice } from '../core/harnesses.js';
 import { color, log } from '../core/logger.js';
+import {
+  emptyOverrides,
+  mergeOverrides,
+  type ParameterOverrides,
+  parseAssignments,
+  readParametersFile,
+} from '../core/parameters.js';
 import { asList, entryDir, readRegistry, refreshEntry, requireEntry } from '../core/registry.js';
 import { findInstallation, readState } from '../core/state.js';
 import type {
@@ -47,12 +54,31 @@ export interface UpdateOptions {
   onConflict?: ConflictPolicy;
   /** Answers shared across every bundle and target this run touches. */
   decisions?: Map<string, Resolution>;
+  /** Parameter answers shared across every bundle and target this run touches. */
+  answers?: Map<string, string>;
   /**
    * Overrides what each installation recorded. Given nothing, every one is
    * reinstalled the way it was installed -- an update should put the new
    * version where the old one was, not quietly relocate it.
    */
   targetOptions?: TargetOptions;
+  /**
+   * `--param` assignments, overriding the values each installation recorded.
+   * Given nothing, every one is rendered with exactly what it was rendered with
+   * before -- an update should not rename the agent behind your back.
+   */
+  params?: string[];
+  /** `--params-file`: files of parameter values, later ones winning. */
+  paramsFiles?: string[];
+  /** `params` and `paramsFiles` already parsed and merged; filled in by this command. */
+  parameterOverrides?: ParameterOverrides;
+  /**
+   * Ask again for every parameter, ignoring what was recorded. The way to
+   * change an answer without remembering how it was originally spelled.
+   */
+  reconfigure?: boolean;
+  /** Never ask; use what is recorded, then the defaults. */
+  prompt?: boolean;
   /**
    * Overrides the subset each installation recorded. Given nothing, every one
    * is reinstalled as the same set of flavors it already was -- `--flavor all`
@@ -72,9 +98,16 @@ export async function updateCommand(
 ): Promise<void> {
   const wanted = references === undefined ? undefined : asList(references);
   const chosen = expandTargets(options.targets);
+
+  // Read up front, so a malformed assignment stops the run before the first
+  // bundle has been rolled back and reinstalled.
+  const parameterOverrides = await collectOverrides(options);
+
   options = {
     ...options,
     decisions: options.decisions ?? new Map<string, Resolution>(),
+    answers: options.answers ?? new Map<string, string>(),
+    parameterOverrides,
     ...(chosen ? { targets: chosen } : {}),
     // Three states, not two: no flag reinstalls what each record says, while
     // `--flavor all` is an empty selection, meaning the whole bundle.
@@ -237,6 +270,23 @@ async function aliasedEntries(
   return matched;
 }
 
+/**
+ * Everything `--param` and `--params-file` said, in one place. Files first,
+ * flags second -- the same reading `hcm install` gives them.
+ */
+async function collectOverrides(options: UpdateOptions): Promise<ParameterOverrides> {
+  const fromFiles: ParameterOverrides[] = [];
+  for (const file of options.paramsFiles ?? []) {
+    fromFiles.push(await readParametersFile(file, options.cwd));
+  }
+
+  return mergeOverrides(
+    options.parameterOverrides ?? emptyOverrides(),
+    ...fromFiles,
+    parseAssignments(options.params),
+  );
+}
+
 /** Nothing to do -- say which "nothing" this is, since the fixes differ. */
 function reportEmpty(selection: Selection, options: UpdateOptions): void {
   if (!selection.fromLedger) {
@@ -363,11 +413,19 @@ async function installNewDependencies(
           force: options.force ?? false,
           ...(options.onConflict ? { onConflict: options.onConflict } : {}),
           ...(options.decisions ? { decisions: options.decisions } : {}),
+          ...(options.answers ? { answers: options.answers } : {}),
           ...(options.targetOptions ? { targetOptions: options.targetOptions } : {}),
           // A dependency arriving mid-update is narrowed the same way the run
           // is; one that has no such flavor is all common part, so it comes
           // whole. See `core/flavors.ts`.
           ...(options.flavors?.length ? { flavors: options.flavors } : {}),
+          // It has never been installed here, so it has nothing recorded and
+          // asks for its own parameters from scratch -- with whatever this run
+          // supplied on the command line available to answer them.
+          ...(options.parameterOverrides
+            ? { parameterOverrides: options.parameterOverrides }
+            : {}),
+          ...(options.prompt === false ? { prompt: false } : {}),
         },
         {
           auto: true,
@@ -412,8 +470,17 @@ async function reinstall(
       // the new version exactly where the old one was, and no more of it.
       targetOptions: options.targetOptions ?? record.targetOptions ?? {},
       flavors: options.flavors ?? record.flavors ?? [],
+      // Handed over rather than looked up: the rollback above has already taken
+      // the record away, so by now there is nothing left on disk to read them
+      // from. This is what makes an update render the new version with the same
+      // values the old one had.
+      ...(record.parameters ? { recordedParameters: record.parameters } : {}),
+      ...(options.parameterOverrides ? { parameterOverrides: options.parameterOverrides } : {}),
+      ...(options.reconfigure ? { reconfigure: true } : {}),
+      ...(options.prompt === false ? { prompt: false } : {}),
       ...(options.onConflict ? { onConflict: options.onConflict } : {}),
       ...(options.decisions ? { decisions: options.decisions } : {}),
+      ...(options.answers ? { answers: options.answers } : {}),
     },
     {
       // An update does not change why a bundle is here, only what it holds.

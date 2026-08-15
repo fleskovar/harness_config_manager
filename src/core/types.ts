@@ -114,6 +114,82 @@ export type FlavorDeclaration =
   | string[]
   | Record<string, string | null | { description?: string; includes?: string | string[] }>;
 
+/**
+ * One value a bundle is customised with when it is installed.
+ *
+ * The name is what `<%AGENT_NAME%>` in the bundle's files refers to; everything
+ * else says how the value is arrived at and where it applies. See
+ * `core/parameters.ts`.
+ */
+export interface ParameterDefinition {
+  /** `AGENT_NAME` -- the spelling used inside `<% %>`. */
+  name: string;
+  description?: string;
+  /** Used when nothing else supplies a value; also the prompt's suggestion. */
+  default?: string;
+  /** Must end up with a value. Defaults to true when there is no `default`. */
+  required: boolean;
+  /** Only these values are accepted, and the prompt becomes a menu. */
+  choices?: string[];
+  /** A regular expression the value has to match, as written in the manifest. */
+  pattern?: string;
+  /**
+   * Never written to the installation ledger. `hcm update` therefore has to be
+   * given it again -- which is the trade for not keeping a token in a file that
+   * gets committed.
+   */
+  secret?: boolean;
+  /**
+   * Applies only when one of these flavors is being installed. Empty means it
+   * applies to every install -- a *global* parameter. See `core/flavors.ts`.
+   */
+  flavors: string[];
+  /** Applies only to these harnesses. Empty means all of them. */
+  targets: TargetId[];
+}
+
+/**
+ * How `parameters:` may be written in a manifest -- names alone, names with a
+ * description, or names with the full shape. `normalizeParameters` turns all
+ * three into `ParameterDefinition[]`.
+ */
+export type ParameterDeclaration =
+  | string[]
+  | Record<
+      string,
+      | string
+      | null
+      | {
+          description?: string;
+          default?: string | number | boolean | null;
+          required?: boolean;
+          choices?: string[];
+          pattern?: string;
+          secret?: boolean;
+          flavors?: string | string[];
+          flavor?: string | string[];
+          targets?: string | string[];
+          target?: string | string[];
+        }
+    >;
+
+/**
+ * A parameter as the registry records it: enough to say what a bundle will ask
+ * for without reading the bundle's files.
+ */
+export interface ParameterSummary {
+  name: string;
+  description?: string;
+  default?: string;
+  required?: boolean;
+  secret?: boolean;
+  flavors?: string[];
+  targets?: TargetId[];
+}
+
+/** Resolved parameter values, by name. */
+export type ParameterValues = Record<string, string>;
+
 export interface BundleManifest {
   name: string;
   version: string;
@@ -127,6 +203,8 @@ export interface BundleManifest {
   dependencies?: (string | BundleDependency)[];
   /** Subsets this bundle can be installed as. See `core/flavors.ts`. */
   flavors?: FlavorDeclaration;
+  /** Values asked for at install time. See `core/parameters.ts`. */
+  parameters?: ParameterDeclaration;
 }
 
 // ---------------------------------------------------------------------------
@@ -169,6 +247,8 @@ export interface LoadedBundle {
    * declares none -- whatever its resources named for themselves.
    */
   flavors: FlavorDefinition[];
+  /** `manifest.parameters`, in one shape, validated at load time. */
+  parameters: ParameterDefinition[];
 }
 
 // ---------------------------------------------------------------------------
@@ -202,6 +282,12 @@ export interface RegistryEntry {
    * reading every stored bundle from disk.
    */
   flavors?: FlavorSummary[];
+  /**
+   * The values it will ask for at install time, as its manifest had them when
+   * it was registered -- so `hcm registry list` can warn that installing it is
+   * not going to be silent.
+   */
+  parameters?: ParameterSummary[];
   /**
    * Directory name inside the store holding this bundle's files. Absent for
    * `--dev` entries, which are read from `source` in place.
@@ -322,6 +408,16 @@ export interface InstallationRecord {
    * `hcm update` reinstalls the same subset without being told again.
    */
   flavors?: string[];
+  /**
+   * The values this installation's templates were rendered with. Absent means
+   * the bundle asked for none -- which is what every record written before
+   * parameters existed meant too.
+   *
+   * `hcm update` renders the new version with these same values, so an update
+   * never silently renames the agent. Parameters marked `secret` are not here:
+   * they have to be supplied again.
+   */
+  parameters?: ParameterValues;
   /**
    * The bundles this one required, resolved at install time. `hcm uninstall`
    * reads these to know what is still needed, and what has been orphaned.
@@ -451,6 +547,21 @@ export interface PlanReferences {
   dropped: { path: string; ref: string; reason: string }[];
 }
 
+/**
+ * What became of the `<%PLACEHOLDERS%>` in the bundle's text on the way into
+ * this target -- see `core/parameters.ts`. Reported rather than silently
+ * applied, for the same reason references are: a placeholder left standing is
+ * one the agent will read out loud.
+ */
+export interface PlanTemplating {
+  /** The values everything was rendered with. */
+  values: ParameterValues;
+  /** Filled in, one entry per file and name. */
+  substituted: { path: string; name: string; count: number }[];
+  /** Left in the text verbatim, because nothing here had a value for it. */
+  unresolved: { path: string; name: string; reason: string }[];
+}
+
 export interface InstallPlan {
   bundle: LoadedBundle;
   target: TargetId;
@@ -459,6 +570,8 @@ export interface InstallPlan {
   targetOptions: TargetOptions;
   /** The flavors asked for. Empty is the whole bundle. */
   flavors: string[];
+  /** Absent on plans built before parameters existed, or for an empty plan. */
+  templating?: PlanTemplating;
   /** Absolute root the action paths are relative to. */
   scopeRoot: string;
   actions: PlanAction[];

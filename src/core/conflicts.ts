@@ -20,6 +20,7 @@
 
 import { AbortedError, ConflictError } from './errors.js';
 import { color, log } from './logger.js';
+import { applicableParameters, applyParameters } from './parameters.js';
 import { detectConflicts, resourceActions } from './planner.js';
 import { isInteractive, select, text } from './prompt.js';
 import { remapReferences } from './refmap.js';
@@ -96,6 +97,14 @@ export async function resolvePlanConflicts(
   const bundleName = plan.bundle.manifest.name;
   const decisions = options.decisions ?? new Map<string, Resolution>();
 
+  // A rename regenerates one resource's writes from the bundle, so they arrive
+  // holding raw `<%PLACEHOLDERS%>` again and have to be rendered like the rest.
+  const parameterValues = plan.templating?.values ?? {};
+  const parameters = applicableParameters(plan.bundle.parameters, {
+    target: plan.target,
+    flavors: plan.flavors,
+  });
+
   let actions = plan.actions;
   let conflicts = plan.conflicts;
   const outcomes: ResolutionOutcome[] = [];
@@ -128,9 +137,17 @@ export async function resolvePlanConflicts(
       ...fresh,
       ...rewrite.actions.slice(insertAt),
     ];
-    // The regenerated writes have not been past the file-reference remapper --
-    // that runs once, in buildPlan -- so give just those the same treatment.
-    actions = remapReferences(plan.bundle, combined, fresh).actions;
+    // The regenerated writes have not been past the file-reference remapper or
+    // the parameter renderer -- both run once, in buildPlan -- so give just
+    // those the same treatment, in the same order. They sit where `fresh` was
+    // spliced in, which remapping preserves.
+    const remapped = remapReferences(plan.bundle, combined, fresh).actions;
+    actions = applyParameters(
+      remapped,
+      parameterValues,
+      parameters,
+      remapped.slice(insertAt, insertAt + fresh.length),
+    ).actions;
     answered.add(key);
 
     return {

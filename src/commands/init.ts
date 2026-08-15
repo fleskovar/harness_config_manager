@@ -34,6 +34,14 @@ description: A harness config bundle
 #   python:
 #     description: Python tooling
 #     includes: [rules/python.md, mcp/pyright.json]
+# Values filled into this bundle's files as it is installed, written there as
+# <%AGENT_NAME%> -- context/10-project.md below uses this one. A parameter with
+# a default is never asked for; one without has to be supplied. Add "flavors:"
+# or "targets:" to ask for it only where it matters.
+parameters:
+  AGENT_NAME:
+    description: What the agent should call itself
+    default: Claude
 `,
 
     'README.md': `# ${name}
@@ -77,6 +85,12 @@ appliesTo:
     // One file per section, numbered so the order in the instruction file is
     // the order you see in the directory listing.
     'context/10-project.md': `## ${name}
+
+You are a coding agent called <%AGENT_NAME%>. That name is a *parameter*: it is
+filled in when this bundle is installed, so one bundle can introduce itself
+differently in every project. Change it with
+"hcm install ${name} --param AGENT_NAME=Ada", or delete the line and the
+"parameters:" block in hcm.yaml together.
 
 Instructions that should load in every session go here. They are merged into
 CLAUDE.md / copilot-instructions.md / REASONIX.md / AGENTS.md inside a marker

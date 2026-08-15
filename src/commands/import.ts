@@ -29,6 +29,12 @@ export interface ImportOptions {
    * usable when they all define them -- see `core/flavors.ts`.
    */
   flavors?: string[];
+  /** With --install, `--param` assignments applied to every bundle in the file. */
+  params?: string[];
+  /** With --install, `--params-file` values applied to every bundle in the file. */
+  paramsFiles?: string[];
+  /** With --install, never ask for a parameter value. */
+  prompt?: boolean;
   cwd: string;
 }
 
@@ -75,13 +81,17 @@ export async function importCommand(file: string | undefined, options: ImportOpt
 
   if (options.install && registered.length > 0) {
     log.info('');
-    // One memory of conflict answers across every bundle in the file.
+    // One memory of conflict answers across every bundle in the file, and one
+    // of parameter answers: a file listing five bundles that all want
+    // AGENT_NAME asks for it once.
     const decisions = new Map<string, Resolution>();
+    const answers = new Map<string, string>();
     for (const name of registered) {
       await installCommand(name, {
         scope: options.scope,
         cwd: options.cwd,
         decisions,
+        answers,
         ...(options.targets ? { targets: options.targets } : {}),
         ...(options.force ? { force: true } : {}),
         ...(options.onConflict ? { onConflict: options.onConflict } : {}),
@@ -89,6 +99,9 @@ export async function importCommand(file: string | undefined, options: ImportOpt
         ...(options.noDeps ? { noDeps: true } : {}),
         ...(options.targetOptions ? { targetOptions: options.targetOptions } : {}),
         ...(options.flavors?.length ? { flavors: options.flavors } : {}),
+        ...(options.params?.length ? { params: options.params } : {}),
+        ...(options.paramsFiles?.length ? { paramsFiles: options.paramsFiles } : {}),
+        ...(options.prompt === false ? { prompt: false } : {}),
       });
     }
   }

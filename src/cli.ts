@@ -20,6 +20,11 @@ import { initCommand } from './commands/init.js';
 import { installCommand } from './commands/install.js';
 import { listCommand } from './commands/list.js';
 import {
+  DEFAULT_PARAMS_FILE,
+  paramsInitCommand,
+  paramsListCommand,
+} from './commands/params.js';
+import {
   registryAddCommand,
   registryListCommand,
   registryOpenCommand,
@@ -142,6 +147,38 @@ const piSubagentsOption = () =>
 const targetOptionsFrom = (options: { piSubagents?: boolean }): TargetOptions =>
   options.piSubagents ? { piSubagents: true } : {};
 
+/**
+ * Repeatable rather than variadic, unlike `--target` and `--flavor`.
+ *
+ * A variadic `--param` would swallow the bundle names after it exactly the way
+ * those two do -- and here it would be worse, because `NAME=value` pairs are
+ * the kind of thing people write several of, so the trap would be sprung most
+ * of the time rather than occasionally.
+ */
+const collect = (value: string, previous: string[] = []): string[] => [...previous, value];
+
+/**
+ * The values a bundle is customised with. See `core/parameters.ts`; the names
+ * are the bundle's, so there is nothing for the CLI to validate here.
+ */
+const paramOption = () =>
+  new Option(
+    '--param <name=value>',
+    'set a bundle parameter; repeatable, and scopable as bundle:NAME=value or bundle@harness:NAME=value',
+  ).argParser(collect);
+
+const paramsFileOption = () =>
+  new Option(
+    '--params-file <file>',
+    'read parameter values from a YAML or JSON file; repeatable, later files winning',
+  ).argParser(collect);
+
+const noPromptOption = () =>
+  new Option(
+    '--no-prompt',
+    'never ask for a parameter value: use what is supplied, then the defaults',
+  );
+
 program
   .command('install')
   .argument(
@@ -153,6 +190,9 @@ program
   .addOption(flavorOption())
   .addOption(scopeOption())
   .addOption(conflictOption())
+  .addOption(paramOption())
+  .addOption(paramsFileOption())
+  .addOption(noPromptOption())
   .option('--dry-run', 'show what would change without writing')
   .option('--force', 'overwrite conflicting items (same as --on-conflict overwrite)')
   .option('--refresh', 're-download a GitHub bundle instead of using the cache')
@@ -167,8 +207,11 @@ program
       force: options.force,
       onConflict: options.onConflict as ConflictPolicy | undefined,
       refresh: options.refresh,
-      // commander gives --no-deps as deps: false
+      // commander gives --no-deps as deps: false, and --no-prompt as prompt: false
       noDeps: options.deps === false,
+      params: options.param as string[] | undefined,
+      paramsFiles: options.paramsFile as string[] | undefined,
+      prompt: options.prompt !== false,
       targetOptions: targetOptionsFrom(options),
       cwd,
     });
@@ -214,6 +257,14 @@ program
     new Option('-s, --scope <scope>', 'scopes to update').choices(['project', 'user', 'all']),
   )
   .addOption(conflictOption())
+  // Omitted, each installation is rendered again with the values it recorded;
+  // passing either changes them for the installations this run touches.
+  .addOption(paramOption())
+  .addOption(paramsFileOption())
+  .addOption(
+    new Option('--reconfigure', 'ask for every parameter again, ignoring what was recorded'),
+  )
+  .addOption(noPromptOption())
   .option('--dry-run', 'show what would change without writing')
   .option('--force', 'replace items that were edited since install')
   // Omitted, each installation keeps what it recorded; passing it switches
@@ -226,6 +277,10 @@ program
       dryRun: options.dryRun,
       force: options.force,
       onConflict: options.onConflict as ConflictPolicy | undefined,
+      params: options.param as string[] | undefined,
+      paramsFiles: options.paramsFile as string[] | undefined,
+      reconfigure: options.reconfigure,
+      prompt: options.prompt !== false,
       ...(options.piSubagents ? { targetOptions: { piSubagents: true } } : {}),
       // Passed through as given: "not asked for" and "asked for all of it" are
       // different instructions here, and `updateCommand` tells them apart.
@@ -261,11 +316,15 @@ program
   .description('show what bundles contain and where each item would land')
   .addOption(scopeOption())
   .addOption(flavorOption())
+  .addOption(paramOption())
+  .addOption(paramsFileOption())
   .addOption(piSubagentsOption())
   .action(async (bundles, options) => {
     await infoCommand(bundles, {
       scope: options.scope as Scope,
       flavors: options.flavor,
+      params: options.param as string[] | undefined,
+      paramsFiles: options.paramsFile as string[] | undefined,
       targetOptions: targetOptionsFrom(options),
       cwd,
     });
@@ -333,6 +392,9 @@ program
   .addOption(flavorOption())
   .addOption(scopeOption())
   .addOption(conflictOption())
+  .addOption(paramOption())
+  .addOption(paramsFileOption())
+  .addOption(noPromptOption())
   .option('--dry-run', 'with --install, show what would change without writing')
   .option('--force', 'with --install, overwrite conflicting items')
   .option('--no-deps', 'with --install, do not pull in the bundles each one requires')
@@ -347,6 +409,9 @@ program
       onConflict: options.onConflict as ConflictPolicy | undefined,
       dryRun: options.dryRun,
       noDeps: options.deps === false,
+      params: options.param as string[] | undefined,
+      paramsFiles: options.paramsFile as string[] | undefined,
+      prompt: options.prompt !== false,
       targetOptions: targetOptionsFrom(options),
       cwd,
     });
@@ -465,6 +530,60 @@ refs
       cwd,
     });
     if (!ok) process.exitCode = 1;
+  });
+
+/**
+ * `hcm params` -- the values bundles are customised with.
+ *
+ * `list` is read-only: the way to change a value is to render the bundle again
+ * with the new one, which is `hcm install --param` or `hcm update --param`.
+ * `init` writes the file those installs can read the values out of.
+ */
+const params = program
+  .command('params')
+  .description('the values bundles are customised with at install time');
+
+params
+  .command('list', { isDefault: true })
+  .argument('[bundle...]', 'installed bundle name(s); defaults to all of them')
+  .description('show the parameter values each installation was rendered with')
+  .addOption(targetOption())
+  .addOption(
+    new Option('-s, --scope <scope>', 'scope to inspect').choices(['project', 'user', 'all']),
+  )
+  .option('--json', 'machine-readable output')
+  .action(async (bundles, options) => {
+    await paramsListCommand(bundles, {
+      targets: options.target,
+      scope: options.scope as Scope | 'all' | undefined,
+      json: options.json,
+      cwd,
+    });
+  });
+
+params
+  .command('init')
+  .argument(
+    '[bundle...]',
+    'bundles to write questions for; omit for everything installed here',
+  )
+  .description('write a parameters file to fill in and pass back with --params-file')
+  .addOption(targetOption())
+  .addOption(flavorOption())
+  .addOption(scopeOption())
+  .option('-o, --output <file>', `where to write it (default: ${DEFAULT_PARAMS_FILE})`)
+  .option('--stdout', 'print it instead of writing a file')
+  .option('--force', 'replace the file if it is already there')
+  .action(async (bundles, options) => {
+    await paramsInitCommand(bundles, {
+      targets: options.target,
+      flavors: options.flavor,
+      scope: options.scope as Scope,
+      output: options.output,
+      stdout: options.stdout,
+      force: options.force,
+      cwd,
+    });
   });
 
 const config = program.command('config').description('view and change hcm settings');

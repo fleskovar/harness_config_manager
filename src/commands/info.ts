@@ -4,10 +4,21 @@ import { assertFlavorsAvailable, expandFlavors } from '../core/flavors.js';
 import { describeSource } from '../core/github.js';
 import { color, log } from '../core/logger.js';
 import { sharedFiles } from '../core/overlap.js';
+import {
+  applicableParameters,
+  describeScope,
+  emptyOverrides,
+  mergeOverrides,
+  overridesFor,
+  parseAssignments,
+  readParametersFile,
+  withDefaults,
+} from '../core/parameters.js';
 import { buildPlan } from '../core/planner.js';
 import { asList, readRegistry, resolveBundles } from '../core/registry.js';
 import type {
   LoadedBundle,
+  ParameterValues,
   ResourceKind,
   Scope,
   TargetId,
@@ -21,6 +32,14 @@ export interface InfoOptions {
   targetOptions?: TargetOptions;
   /** Preview a narrowed install rather than the whole bundle. */
   flavors?: string[];
+  /**
+   * `--param` assignments, so the preview shows the text an install with those
+   * values would really write. Anything not given falls back to the parameter's
+   * default -- `hcm info` asks nothing, being a way of *looking* at a bundle.
+   */
+  params?: string[];
+  /** `--params-file`: files of parameter values, later ones winning. */
+  paramsFiles?: string[];
   cwd: string;
 }
 
@@ -41,10 +60,16 @@ export async function infoCommand(
 
   const registry = await readRegistry();
 
+  const fromFiles = [];
+  for (const file of options.paramsFiles ?? []) {
+    fromFiles.push(await readParametersFile(file, options.cwd));
+  }
+  const overrides = mergeOverrides(...fromFiles, parseAssignments(options.params));
+
   for (const [index, bundle] of bundles.entries()) {
     if (index > 0) log.plain(color.dim('\n' + '─'.repeat(60)));
     const entry = registry.entries.find((candidate) => candidate.name === bundle.manifest.name);
-    await describeBundle(bundle, options, entry?.id);
+    await describeBundle(bundle, options, entry?.id, overrides);
   }
 }
 
@@ -52,6 +77,7 @@ async function describeBundle(
   bundle: LoadedBundle,
   options: InfoOptions,
   id?: string,
+  overrides = emptyOverrides(),
 ): Promise<void> {
   const { manifest } = bundle;
 
@@ -64,6 +90,7 @@ async function describeBundle(
 
   await describeDependencies(bundle, options);
   describeFlavors(bundle, options);
+  describeParameters(bundle);
 
   const byKind = new Map<ResourceKind, string[]>();
   for (const resource of bundle.resources) {
@@ -92,12 +119,23 @@ async function describeBundle(
       options.cwd,
       options.targetOptions ?? {},
       options.flavors ?? [],
+      previewValues(bundle, targetId, options, overrides),
     );
 
     log.plain(color.bold(`\n${target.title}`) + color.dim(` · ${options.scope}`));
     for (const action of plan.actions) log.plain(`  ${action.describe}`);
     for (const skip of plan.skipped) {
       log.plain(color.dim(`  (skipped ${skip.resource.name}: ${skip.reason})`));
+    }
+
+    // A placeholder with nothing to fill it is the one thing a preview can tell
+    // you that reading the bundle cannot.
+    const seen = new Set<string>();
+    for (const miss of plan.templating?.unresolved ?? []) {
+      const key = `${miss.path}::${miss.name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      log.plain(color.yellow(`  ! ${miss.path}: "<%${miss.name}%>" ${miss.reason}`));
     }
 
     // Where this harness's layout forces a reference to be written differently
@@ -193,6 +231,79 @@ function describeFlavors(bundle: LoadedBundle, options: InfoOptions): void {
   if (requested.size === 0) {
     log.plain(color.dim('  Installing without --flavor installs all of it.'));
   }
+}
+
+/**
+ * The values this preview renders with: whatever was passed, then each
+ * parameter's own default.
+ *
+ * Nothing is asked and nothing is read from the ledger. `hcm info` is for
+ * looking at a bundle you have not installed -- a preview that stopped to
+ * interrogate you would be a strange kind of looking, and one that quietly used
+ * another project's answers would be a misleading one.
+ */
+function previewValues(
+  bundle: LoadedBundle,
+  target: TargetId,
+  options: InfoOptions,
+  overrides: ReturnType<typeof emptyOverrides>,
+): ParameterValues {
+  const supplied = overridesFor(overrides, bundle.manifest.name, target);
+  const values: ParameterValues = {};
+
+  for (const parameter of applicableParameters(bundle.parameters, {
+    target,
+    flavors: options.flavors ?? [],
+  })) {
+    const value = supplied[parameter.name] ?? parameter.default;
+    if (value !== undefined) values[parameter.name] = value;
+  }
+
+  // Anything narrowed away still renders as its default, exactly as it would
+  // in a real install of this harness.
+  return withDefaults(values, bundle.parameters);
+}
+
+/**
+ * What installing this bundle will ask for.
+ *
+ * Printed against the whole bundle even when `--flavor` narrowed the preview,
+ * for the same reason the flavors are: the question it answers is what *could*
+ * be asked, which a narrowed listing cannot.
+ */
+function describeParameters(bundle: LoadedBundle): void {
+  if (bundle.parameters.length === 0) return;
+
+  log.plain(color.bold('\nParameters'));
+
+  for (const parameter of bundle.parameters) {
+    const fallback =
+      parameter.default !== undefined
+        ? color.dim(` [${parameter.default}]`)
+        : parameter.required
+          ? color.yellow(' (required)')
+          : color.dim(' (optional)');
+    const scope = describeScope(parameter);
+
+    log.plain(
+      `  ${color.bold(parameter.name)}${fallback}` +
+        (parameter.description ? ` ${color.dim(`— ${parameter.description}`)}` : ''),
+    );
+    const notes = [
+      ...(scope ? [`only for ${scope}`] : []),
+      ...(parameter.choices ? [`one of: ${parameter.choices.join(', ')}`] : []),
+      ...(parameter.pattern ? [`matching ${parameter.pattern}`] : []),
+      ...(parameter.secret ? ['not stored; supply it again on update'] : []),
+    ];
+    if (notes.length > 0) log.plain(color.dim(`      ${notes.join('; ')}`));
+  }
+
+  log.plain(
+    color.dim(
+      "  Written as <%NAME%> in the bundle's files; set with --param NAME=value, with a " +
+        '--params-file, or by answering when hcm asks.',
+    ),
+  );
 }
 
 /**

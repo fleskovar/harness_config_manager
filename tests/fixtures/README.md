@@ -20,6 +20,7 @@ like: `git checkout` puts them back.
 | `bundles/review-kit-v2` | `lifecycle-fixtures` | The same bundle one version on — diff it against `review-kit` |
 | `bundles/broken-refs-kit` | `refs-fixtures` | Four broken references, and a pile of paths that only look broken |
 | `bundles/polyglot-kit` | `flavors` | One kit, two languages: five common resources, five Python, two C# |
+| `bundles/branded-kit` | `parameters` | A kit finished at install time: six `<%PLACEHOLDERS%>`, one of each kind |
 | `bundles/invalid-kit` | `lifecycle-fixtures` | Three mistakes `hcm validate` is supposed to name |
 | `collections/sprint-collection` | `deps-fixtures` | `sprint-kit`, the `team-conventions` it requires, and a skill they both ship |
 | `projects/existing-setup` | `conflicts-fixtures` | A project with its own MCP servers and a hand-written `CLAUDE.md` |

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "light-plan": {
+      "command": "lpm",
+      "args": [
+        "mcp",
+        "--user",
+        "DEEPSEEK DEV"
+      ]
+    }
+  }
+}

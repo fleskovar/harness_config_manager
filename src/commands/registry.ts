@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { HcmError } from '../core/errors.js';
 import { flavorNames } from '../core/flavors.js';
+import { parameterNames } from '../core/parameters.js';
 import { ensureDir } from '../core/fsx.js';
 import { describeSource } from '../core/github.js';
 import { color, log } from '../core/logger.js';
@@ -78,6 +79,19 @@ export async function registryAddCommand(
       ),
     );
   }
+
+  // The same for a bundle that will stop and ask: knowing the names in advance
+  // is what makes a scripted install possible at all.
+  for (const entry of entries) {
+    if (!entry.parameters?.length) continue;
+    log.info(
+      color.dim(
+        `${color.bold(entry.name)} is customised at install time: ` +
+          `${parameterNames(entry.parameters)} — ` +
+          `e.g. hcm install ${entry.id} --param ${entry.parameters[0]?.name}=<value>`,
+      ),
+    );
+  }
 }
 
 export async function registryRemoveCommand(
@@ -144,6 +158,13 @@ export async function registryListCommand(options: { json?: boolean }): Promise<
     // name or the source can tell you.
     if (entry.flavors?.length) {
       log.plain(`  ${' '.repeat(width)}${color.dim(`flavors: ${flavorNames(entry.flavors)}`)}`);
+    }
+    // And what it will ask for on the way in, which is worth knowing before
+    // running the install rather than when it stops to ask.
+    if (entry.parameters?.length) {
+      log.plain(
+        `  ${' '.repeat(width)}${color.dim(`parameters: ${parameterNames(entry.parameters)}`)}`,
+      );
     }
   }
 }
