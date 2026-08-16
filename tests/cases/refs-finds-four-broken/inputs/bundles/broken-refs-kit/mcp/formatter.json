@@ -1,0 +1,4 @@
+{
+  "command": "bash",
+  "args": ["assets/format.sh", "--serve"]
+}

@@ -1,0 +1,10 @@
+{
+  "describes": "an update installs what v2 added and removes what v2 dropped",
+  "recordState": true,
+  "steps": [
+    { "register": "review-kit", "dev": true },
+    { "install": "review-kit", "targets": ["claude-code"] },
+    { "replaceBundle": "review-kit", "with": "review-kit-v2" },
+    { "update": "review-kit" }
+  ]
+}

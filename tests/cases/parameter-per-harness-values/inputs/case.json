@@ -1,0 +1,15 @@
+{
+  "describes": "one parameter takes a different value in each harness",
+  "recordState": true,
+  "steps": [
+    {
+      "install": "branded-kit",
+      "targets": ["claude-code", "copilot"],
+      "params": [
+        "TEAM=Platform",
+        "branded-kit@claude-code:AGENT_NAME=Ada",
+        "branded-kit@copilot:AGENT_NAME=Cop"
+      ]
+    }
+  ]
+}

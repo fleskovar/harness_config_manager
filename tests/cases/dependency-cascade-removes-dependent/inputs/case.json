@@ -1,0 +1,9 @@
+{
+  "describes": "--cascade removes the dependent as well",
+  "recordState": true,
+  "steps": [
+    { "register": "team-conventions" },
+    { "install": "sprint-kit", "targets": ["claude-code"] },
+    { "uninstall": "team-conventions", "cascade": true }
+  ]
+}

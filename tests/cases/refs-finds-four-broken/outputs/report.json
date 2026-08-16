@@ -1,0 +1,33 @@
+{
+  "broken": [
+    {
+      "file": "commands/review-pr.md",
+      "ref": "context/conventions.md",
+      "suggestions": [
+        "context/10-conventions.md"
+      ]
+    },
+    {
+      "file": "mcp/formatter.json",
+      "ref": "assets/format.sh",
+      "suggestions": [
+        "assets/format-code.sh"
+      ]
+    },
+    {
+      "file": "skills/release-audit/SKILL.md",
+      "ref": "checklist.md",
+      "suggestions": [
+        "skills/release-audit/release-checklist.md",
+        "rules/typescript.md"
+      ]
+    },
+    {
+      "file": "subagents/code-reviewer.md",
+      "ref": "rules/typescrpt.md",
+      "suggestions": [
+        "rules/typescript.md"
+      ]
+    }
+  ]
+}

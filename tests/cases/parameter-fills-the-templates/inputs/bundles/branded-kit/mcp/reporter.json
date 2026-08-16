@@ -1,0 +1,7 @@
+{
+  "command": "npx",
+  "args": ["-y", "@acme/reporter", "--team", "<%TEAM%>"],
+  "env": {
+    "REPORTER_TOKEN": "<%API_TOKEN%>"
+  }
+}

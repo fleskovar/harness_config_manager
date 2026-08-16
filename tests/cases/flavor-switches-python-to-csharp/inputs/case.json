@@ -1,0 +1,9 @@
+{
+  "describes": "update --flavor csharp swaps the halves over, taking the old one away",
+  "recordState": true,
+  "steps": [
+    { "register": "polyglot-kit", "dev": true },
+    { "install": "polyglot-kit", "targets": ["claude-code"], "flavors": ["python"] },
+    { "update": "polyglot-kit", "flavors": ["csharp"] }
+  ]
+}

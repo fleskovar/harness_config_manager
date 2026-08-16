@@ -1,0 +1,6 @@
+{
+  "describes": "a required parameter with nowhere to come from stops the run before anything is written",
+  "steps": [
+    { "install": "branded-kit", "targets": ["claude-code"], "fails": true }
+  ]
+}

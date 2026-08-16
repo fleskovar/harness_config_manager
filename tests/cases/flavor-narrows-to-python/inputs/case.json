@@ -1,0 +1,7 @@
+{
+  "describes": "--flavor python installs the common part plus python, and nothing else",
+  "recordState": true,
+  "steps": [
+    { "install": "polyglot-kit", "targets": ["claude-code"], "flavors": ["python"] }
+  ]
+}

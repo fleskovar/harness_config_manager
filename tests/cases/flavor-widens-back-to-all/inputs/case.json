@@ -1,0 +1,9 @@
+{
+  "describes": "update --flavor all widens a narrowed installation to the whole bundle",
+  "recordState": true,
+  "steps": [
+    { "register": "polyglot-kit", "dev": true },
+    { "install": "polyglot-kit", "targets": ["claude-code"], "flavors": ["python"] },
+    { "update": "polyglot-kit", "flavors": ["all"] }
+  ]
+}

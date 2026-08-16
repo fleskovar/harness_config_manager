@@ -1,0 +1,6 @@
+{
+  "describes": "every resource kind, installed into Reasonix",
+  "steps": [
+    { "install": "sample-kit", "targets": ["reasonix"] }
+  ]
+}

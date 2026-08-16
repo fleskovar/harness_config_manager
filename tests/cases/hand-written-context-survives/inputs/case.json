@@ -1,0 +1,7 @@
+{
+  "describes": "a hand-written CLAUDE.md survives an install and an uninstall, to the byte",
+  "steps": [
+    { "install": "review-kit", "targets": ["claude-code"], "onConflict": "skip" },
+    { "uninstall": "review-kit" }
+  ]
+}

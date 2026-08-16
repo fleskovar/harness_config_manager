@@ -1,0 +1,24 @@
+name: polyglot-kit
+version: 1.0.0
+description: One review kit covering two languages, installable a language at a time.
+tags:
+  - review
+  - polyglot
+
+# Two flavors, declared two different ways on purpose.
+#
+# Markdown resources tag themselves in their own frontmatter -- see
+# subagents/python-typer.md. Everything else has no frontmatter to write in, so
+# the manifest names it here by path. "assets/python" is a directory, and takes
+# everything under it.
+flavors:
+  python:
+    description: Python typing, linting and test tooling
+    includes:
+      - rules/python.md
+      - mcp/pyright.json
+      - assets/python
+  csharp:
+    description: C# analyzers and conventions
+    includes:
+      - rules/csharp.md

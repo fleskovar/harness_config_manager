@@ -1,0 +1,62 @@
+{
+  "installations": [
+    {
+      "id": "polyglot-kit@claude-code@project",
+      "bundle": "polyglot-kit",
+      "version": "1.0.0",
+      "target": "claude-code",
+      "scope": "project",
+      "source": {
+        "type": "local",
+        "bundle": "polyglot-kit"
+      },
+      "receipts": [
+        {
+          "op": "block",
+          "path": "CLAUDE.md",
+          "blockId": "polyglot-kit/10-conventions",
+          "syntax": "markdown"
+        },
+        {
+          "op": "file",
+          "path": ".claude/agents/code-reviewer.md",
+          "hash": "2d604ae1d95edda11445d5aa526c7543625ab27700a9bc3968a033696b7b9b7f"
+        },
+        {
+          "op": "file",
+          "path": ".claude/agents/csharp-analyzer.md",
+          "hash": "a4114e4287df6d937a183fa6d4f7009d3e4f2b8a2cf799884a6ffdaa9c2a0bcc"
+        },
+        {
+          "op": "file",
+          "path": ".claude/commands/review-pr.md",
+          "hash": "001d6542da2b7e3e711655571989388739071b17c20045a3cbf9ef9580eca81f"
+        },
+        {
+          "op": "file",
+          "path": ".claude/rules/csharp.md",
+          "hash": "6916e88c8f553fb7bdab6aced0fa97993a2fe582f3876412aae63c88c06a7fc1"
+        },
+        {
+          "op": "file",
+          "path": ".claude/skills/pr-checklist/SKILL.md",
+          "hash": "21c124dd36f401c1ca1e184d85ef3480b6f78218621bd315aa70b0feb5fb2896"
+        },
+        {
+          "op": "json-array-item",
+          "path": ".claude/settings.json",
+          "pointer": [
+            "permissions",
+            "allow"
+          ],
+          "hashes": [
+            "09d9bde307ba1a1356825f713e71f788219b2015ff97ffe84aac2f1faccaa1ee"
+          ]
+        }
+      ],
+      "flavors": [
+        "csharp"
+      ]
+    }
+  ]
+}

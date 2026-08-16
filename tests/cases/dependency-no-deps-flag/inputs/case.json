@@ -1,0 +1,8 @@
+{
+  "describes": "--no-deps installs only what was named",
+  "recordState": true,
+  "steps": [
+    { "register": "team-conventions" },
+    { "install": "sprint-kit", "targets": ["claude-code"], "noDeps": true }
+  ]
+}

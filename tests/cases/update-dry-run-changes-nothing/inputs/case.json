@@ -1,0 +1,10 @@
+{
+  "describes": "update --dry-run leaves v1 exactly where it was",
+  "recordState": true,
+  "steps": [
+    { "register": "review-kit", "dev": true },
+    { "install": "review-kit", "targets": ["claude-code"] },
+    { "replaceBundle": "review-kit", "with": "review-kit-v2" },
+    { "update": "review-kit", "dryRun": true }
+  ]
+}

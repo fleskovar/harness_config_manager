@@ -1,0 +1,7 @@
+name: review-kit
+version: 1.0.0
+description: "A healthy sample bundle: one of every resource kind, with references between them."
+author: harness-config-manager
+tags:
+  - sample
+  - review

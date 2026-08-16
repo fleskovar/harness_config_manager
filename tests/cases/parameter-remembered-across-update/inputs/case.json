@@ -1,0 +1,13 @@
+{
+  "describes": "an update renders the new version with the values the old one recorded",
+  "recordState": true,
+  "steps": [
+    { "register": "branded-kit", "dev": true },
+    {
+      "install": "branded-kit",
+      "targets": ["claude-code"],
+      "params": ["TEAM=Platform", "AGENT_NAME=Ada"]
+    },
+    { "update": "branded-kit" }
+  ]
+}

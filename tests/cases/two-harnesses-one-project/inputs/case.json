@@ -1,0 +1,8 @@
+{
+  "describes": "installing into two harnesses keeps each one's files to itself",
+  "recordState": true,
+  "steps": [
+    { "install": "review-kit", "targets": ["claude-code"] },
+    { "install": "review-kit", "targets": ["copilot"] }
+  ]
+}

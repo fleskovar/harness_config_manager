@@ -1380,11 +1380,16 @@ src/
 ├── merge/              # json-merge.ts, blocks.ts, toml.ts -- the receipt machinery
 └── targets/            # one adapter per harness
 bundles/ts-review-kit/  # sample bundle exercising every resource kind
-tests/                  # merge/rollback unit tests + install round-trip
-├── fixtures/           # sample bundles and projects the tests run against,
-│                       # small enough to solve by hand -- see its README
-└── target-<harness>/   # one per harness: the sample bundle that goes in, the
-                        # tree that has to come out, and the test between them
+tests/
+├── *.test.ts           # the unit layer: pure functions, plans, refusals,
+│                       #   registry ids, and anything whose assertion is not
+│                       #   "the project looks like this"
+├── cases/              # the readable layer: one folder per behaviour, each
+│                       #   with inputs/, outputs/ and a README walkthrough you
+│                       #   can check by hand -- see its README
+├── case-runner.test.ts # discovers those folders; never edited to add one
+├── run-case.ts         # runs one, with no test framework in the call stack
+└── fixtures/           # shared bundles the unit tests build on -- see its README
 ```
 
 ## Development
@@ -1399,6 +1404,10 @@ tests/                  # merge/rollback unit tests + install round-trip
 | `make dev ARGS="targets"` | Run the CLI from source, no build step |
 | `make run ARGS="list"` | Build, then run the built CLI |
 | `make test-watch` | Tests in watch mode |
+| `make test-cases` | Just the readable case folders |
+| `make test-case CASE=pi-every-kind` | One case |
+| `make debug-case CASE=pi-every-kind` | One case, no test framework in the call stack |
+| `make bless` | Regenerate case baselines — read the diff before committing |
 | `make link` / `make unlink` | Add or remove `hcm` on your PATH |
 | `make demo` | Show where the sample bundle would install |
 | `make pack` | Build a publishable tarball |
@@ -1411,6 +1420,23 @@ tests/                  # merge/rollback unit tests + install round-trip
 Every recipe is a single shell-agnostic command, because make on Windows may
 hand recipes to either `sh` or `cmd.exe`. If you add one, avoid shell builtins
 and pipes — `node -e` handles file operations portably.
+
+### The two test layers
+
+`tests/*.test.ts` is the unit layer, and most of the suite. `tests/cases/` is a
+small readable layer on top: one folder per behaviour, each holding the bundle
+that goes in, the project tree that has to come out, and a `README.md` that
+walks you from one to the other in steps you can check by hand. Adding a case is
+adding a folder — the runner discovers them.
+
+Start there if you are new to the codebase. Pick a case, read its README, then:
+
+```bash
+make debug-case CASE=claude-code-every-kind
+```
+
+which runs it with a clean call stack, so a breakpoint anywhere in `src/` is
+three frames from the top. `tests/cases/README.md` explains the format.
 
 Adding a harness means writing one file in `src/targets/` — a `scopeRoot`, the
 `markers` that mean "this harness is set up here", a list of supported kinds,

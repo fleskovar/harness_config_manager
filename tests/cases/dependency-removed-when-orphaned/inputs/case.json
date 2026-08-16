@@ -1,0 +1,9 @@
+{
+  "describes": "uninstalling the dependent takes the dependency with it",
+  "recordState": true,
+  "steps": [
+    { "register": "team-conventions" },
+    { "install": "sprint-kit", "targets": ["claude-code"] },
+    { "uninstall": "sprint-kit" }
+  ]
+}

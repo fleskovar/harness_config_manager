@@ -1,0 +1,8 @@
+{
+  "describes": "uninstall leaves an adopted item exactly as it was found",
+  "recordState": true,
+  "steps": [
+    { "install": "review-kit", "targets": ["claude-code"] },
+    { "uninstall": "review-kit" }
+  ]
+}

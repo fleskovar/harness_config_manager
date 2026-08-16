@@ -32,6 +32,10 @@ help:
 	@echo   run ............ run the built CLI, e.g. make run ARGS=list
 	@echo   test ........... run the test suite once
 	@echo   test-watch ..... run the test suite in watch mode
+	@echo   test-cases ..... run the human-readable case folders
+	@echo   test-case ...... run one case, e.g. make test-case CASE=pi-every-kind
+	@echo   debug-case ..... run one case under the debugger, no test framework
+	@echo   bless .......... regenerate case baselines - read the diff before committing
 	@echo   typecheck ...... typecheck without emitting
 	@echo   check .......... typecheck plus tests - run this before committing
 	@echo   audit .......... report known vulnerabilities in dependencies
@@ -81,6 +85,28 @@ test:
 
 test-watch:
 	$(NPM) run test:watch
+
+## ---------------------------------------------------------------- readable cases
+
+# The human-readable layer: tests/cases/<name>/{inputs,outputs,README.md}.
+# See tests/cases/README.md for what a case is and how to add one.
+CASE ?=
+
+test-cases:
+	$(NPM) run test:cases
+
+# One case by folder name. `-t` matches the describe, which is the folder name.
+test-case:
+	$(NPM) run test:case -- "$(CASE)"
+
+# No test framework in the call stack: breakpoints land in src/ three frames in.
+debug-case:
+	$(NPM) run debug:case -- "$(CASE)"
+
+# Rewrites every baseline from what the code does now. A regenerated baseline is
+# a diff a human reads line by line, in a commit that changes nothing else.
+bless:
+	$(NPM) run bless
 
 typecheck:
 	$(NPM) run typecheck

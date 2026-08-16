@@ -1,0 +1,9 @@
+{
+  "bundle": "invalid-kit",
+  "ok": false,
+  "problems": [
+    "mcp/broken.json: MCP server needs a \"command\" or \"url\"",
+    "subagents/helper.md: missing \"description\" in frontmatter",
+    "Subagent \"helper\" collides with the skill of the same name (skills/helper, subagents/helper.md): Reasonix and Pi store both as skills/helper/"
+  ]
+}

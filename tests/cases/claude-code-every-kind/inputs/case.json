@@ -1,0 +1,6 @@
+{
+  "describes": "every resource kind, installed into Claude Code",
+  "steps": [
+    { "install": "sample-kit", "targets": ["claude-code"] }
+  ]
+}

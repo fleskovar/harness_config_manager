@@ -1,0 +1,95 @@
+{
+  "installations": [
+    {
+      "id": "branded-kit@claude-code@project",
+      "bundle": "branded-kit",
+      "version": "1.0.0",
+      "target": "claude-code",
+      "scope": "project",
+      "source": {
+        "type": "local",
+        "bundle": "branded-kit"
+      },
+      "receipts": [
+        {
+          "op": "block",
+          "path": "CLAUDE.md",
+          "blockId": "branded-kit/10-identity",
+          "syntax": "markdown"
+        },
+        {
+          "op": "file",
+          "path": ".claude/agents/reviewer.md",
+          "hash": "de549d98032e0e54cd9f586cd9a9fc4c4f400c403905ee4278cecf3dfe88bea2"
+        },
+        {
+          "op": "file",
+          "path": ".claude/commands/handoff.md",
+          "hash": "3ed62a8a8540b1d885ece4a2d009c4c4403e3d96d344e6684e57ce087a28d3d7"
+        },
+        {
+          "op": "file",
+          "path": ".claude/rules/style.md",
+          "hash": "a16ebeeb486e8e3b91f2173e29c9a30dec7e957523354b57ee9b256ff0a00fdd"
+        },
+        {
+          "op": "file",
+          "path": ".claude/run-tests.sh",
+          "hash": "1cc573508289dd7fa702bffe5d9683124a1caed0e25bf02234b8b1501d3fe5a0"
+        },
+        {
+          "op": "file",
+          "path": ".claude/skills/onboarding/SKILL.md",
+          "hash": "0fc3b819f7439eab7230c76081b1647f232dc892393e1359abe74506236da0b0"
+        },
+        {
+          "op": "file",
+          "path": ".claude/skills/onboarding/welcome.md",
+          "hash": "243fb48cb5518bfc38cb6299c69e599c67339d6e84ffaebccfa79cdf75497ae2"
+        },
+        {
+          "op": "file",
+          "path": ".claude/skills/pytest-runner/SKILL.md",
+          "hash": "8986402b17562ee78bdb7f23cdd751954a5cf1e42a480410edaebd23d0e9130c"
+        },
+        {
+          "op": "json-array-item",
+          "path": ".claude/settings.json",
+          "pointer": [
+            "permissions",
+            "allow"
+          ],
+          "hashes": [
+            "9506d0b0ed5234c8aa59428d720f0bf7a5156f68a1a44cd4032b50ca1307fd65"
+          ]
+        },
+        {
+          "op": "json-value",
+          "path": ".claude/settings.json",
+          "pointer": [
+            "agentName"
+          ],
+          "hash": "a39afeed7d3319213be7a235840b3c6d3f09f2810b9c91779f34572b6b36832a",
+          "hadPrevious": false
+        },
+        {
+          "op": "json-value",
+          "path": ".mcp.json",
+          "pointer": [
+            "mcpServers",
+            "reporter"
+          ],
+          "hash": "223955077297362754aaa4cbb9effca810355f9b14b22c66c603f8f531105f72",
+          "hadPrevious": false
+        }
+      ],
+      "parameters": {
+        "AGENT_NAME": "Ada",
+        "TEAM": "Platform",
+        "TONE": "direct",
+        "PYTEST_ARGS": "-q",
+        "CLAUDE_MODEL": "sonnet"
+      }
+    }
+  ]
+}

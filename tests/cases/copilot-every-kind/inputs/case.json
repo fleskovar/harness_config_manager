@@ -1,0 +1,6 @@
+{
+  "describes": "every resource kind, installed into GitHub Copilot",
+  "steps": [
+    { "install": "sample-kit", "targets": ["copilot"] }
+  ]
+}

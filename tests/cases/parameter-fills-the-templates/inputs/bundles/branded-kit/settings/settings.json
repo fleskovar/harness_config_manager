@@ -1,0 +1,6 @@
+{
+  "agentName": "<%AGENT_NAME%>",
+  "permissions": {
+    "allow": ["Read(**)"]
+  }
+}

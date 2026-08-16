@@ -1,0 +1,61 @@
+{
+  // Debugging entry points. The two that matter:
+  //
+  //   "Debug: one human-readable case"  runs tests/run-case.ts with no test
+  //       framework in the call stack, so a breakpoint in src/ is three frames
+  //       from the top. This is the fastest way to learn a part of hcm.
+  //   "Debug: current test file"        runs vitest on whatever is open.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug: one human-readable case",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["tsx", "${workspaceFolder}/tests/run-case.ts", "${input:caseName}"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug: current test file",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vitest",
+        "run",
+        "--no-file-parallelism",
+        "--testTimeout=0",
+        "${relativeFile}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug: hcm CLI",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["tsx", "${workspaceFolder}/src/cli.ts", "${input:cliArgs}"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ],
+  "inputs": [
+    {
+      "id": "caseName",
+      "type": "promptString",
+      "description": "Case folder under tests/cases/",
+      "default": "claude-code-every-kind"
+    },
+    {
+      "id": "cliArgs",
+      "type": "promptString",
+      "description": "hcm arguments",
+      "default": "info ./bundles/ts-review-kit"
+    }
+  ]
+}

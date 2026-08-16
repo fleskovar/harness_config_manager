@@ -1,0 +1,8 @@
+{
+  "describes": "append puts back only the section the agent's rewrite lost",
+  "steps": [
+    { "install": "review-kit", "targets": ["claude-code"] },
+    { "writeFile": "CLAUDE.md", "from": "rewritten-CLAUDE.md" },
+    { "context": "append" }
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "describes": "validate names all three mistakes in the bundle written to have them",
+  "steps": [{ "validate": "invalid-kit" }]
+}

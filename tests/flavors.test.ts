@@ -273,6 +273,14 @@ describe('what the command line means', () => {
 // Installing part of a bundle
 // ---------------------------------------------------------------------------
 
+/**
+ * What a narrowed install *writes* is four case folders --
+ * `tests/cases/flavor-narrows-to-python/`, `flavor-widens-back-to-all/`,
+ * `flavor-switches-python-to-csharp/` -- where the file list is a baseline you
+ * can check against polyglot-kit by hand. What is left here is the one input
+ * shape they do not have: two flavor names at once, which takes a different
+ * branch of `expandFlavors` than `--flavor all` does.
+ */
 describe('a narrowed install', () => {
   /** Common, and nothing else. */
   const COMMON_FILES = [
@@ -283,96 +291,11 @@ describe('a narrowed install', () => {
     'CLAUDE.md', // context/10-conventions.md
   ];
 
-  it('writes the common part plus the flavor asked for', async () => {
-    await install(['python']);
-
-    expect(await listTree(projectDir)).toEqual(
-      [
-        ...COMMON_FILES,
-        '.claude/agents/python-typer.md', // subagents/python-typer.md
-        '.claude/python/lint.sh', // assets/python/lint.sh
-        '.claude/rules/python.md', // rules/python.md
-        '.claude/skills/pytest-runner/SKILL.md', // skills/pytest-runner/
-        '.claude/skills/pytest-runner/failure-modes.md',
-        '.mcp.json', // mcp/pyright.json
-      ].sort(),
-    );
-  });
-
-  it('leaves out the other flavor entirely', async () => {
-    await install(['python']);
-
-    expect(await exists(projectDir, '.claude/agents/csharp-analyzer.md')).toBe(false);
-    expect(await exists(projectDir, '.claude/rules/csharp.md')).toBe(false);
-  });
-
-  it('installs everything when no flavor is named', async () => {
-    await install();
-
-    expect(await exists(projectDir, '.claude/agents/python-typer.md')).toBe(true);
-    expect(await exists(projectDir, '.claude/agents/csharp-analyzer.md')).toBe(true);
-    expect(await exists(projectDir, '.claude/rules/python.md')).toBe(true);
-    expect(await exists(projectDir, '.claude/rules/csharp.md')).toBe(true);
-  });
-
   it('takes several flavors at once', async () => {
     await install(['python', 'csharp']);
 
     // Both languages, which for this bundle is everything.
     expect(await listTree(projectDir)).toEqual(await listTreeOfFullInstall());
-  });
-
-  it('narrows the smaller flavor just as well', async () => {
-    await install(['csharp']);
-
-    expect(await listTree(projectDir)).toEqual(
-      [
-        ...COMMON_FILES,
-        '.claude/agents/csharp-analyzer.md',
-        '.claude/rules/csharp.md',
-      ].sort(),
-    );
-    // The MCP server belongs to the Python flavor, so there is no .mcp.json at all.
-    expect(await exists(projectDir, '.mcp.json')).toBe(false);
-  });
-
-  it('claims only what it wrote, so uninstall leaves nothing behind', async () => {
-    await install(['python']);
-    const [record] = await records();
-    expect(record?.receipts).toHaveLength(11);
-
-    await uninstallCommand('polyglot-kit', {
-      targets: ['claude-code'],
-      scope: 'project',
-      cwd: projectDir,
-    });
-
-    expect(await listTree(projectDir)).toEqual([]);
-  });
-
-  it('writes no "flavors" key into the files it installs', async () => {
-    await install(['python']);
-
-    // The tag is hcm's bookkeeping; a harness reading the frontmatter must not
-    // find a key it has never heard of.
-    expect(await readText(projectDir, '.claude/agents/python-typer.md')).not.toMatch(/flavors/);
-    expect(await readText(projectDir, '.claude/skills/pytest-runner/SKILL.md')).not.toMatch(
-      /flavors/,
-    );
-  });
-
-  it('remembers the choice, so nothing has to be told again', async () => {
-    await install(['python']);
-
-    expect((await records())[0]?.flavors).toEqual(['python']);
-  });
-
-  it('records nothing when the whole bundle was installed', async () => {
-    await install();
-
-    // Absent, not empty: that is what every record written before flavors
-    // existed says, and it has to keep meaning "all of it".
-    expect((await records())[0]).not.toHaveProperty('flavors');
   });
 
   /** The file list a full install produces, for comparing a widened one against. */
@@ -649,50 +572,6 @@ describe('updating a bundle installed as part of itself', () => {
     expect(await exists(projectDir, '.claude/agents/python-typer.md')).toBe(true);
     expect(await exists(projectDir, '.claude/agents/csharp-analyzer.md')).toBe(false);
     expect((await records())[0]?.flavors).toEqual(['python']);
-  });
-
-  it('switches flavor when told to, taking the old one away', async () => {
-    await register();
-    await installCommand('polyglot-kit', {
-      targets: ['claude-code'],
-      scope: 'project',
-      cwd: projectDir,
-      flavors: ['python'],
-    });
-
-    await updateCommand(['polyglot-kit'], {
-      targets: ['claude-code'],
-      cwd: projectDir,
-      flavors: ['csharp'],
-    });
-
-    // An update is rollback-then-install, so the Python half goes rather than
-    // being left behind beside the C# half.
-    expect(await exists(projectDir, '.claude/agents/python-typer.md')).toBe(false);
-    expect(await exists(projectDir, '.claude/agents/csharp-analyzer.md')).toBe(true);
-    expect((await records())[0]?.flavors).toEqual(['csharp']);
-  });
-
-  it('widens back to the whole bundle with --flavor all', async () => {
-    await register();
-    await installCommand('polyglot-kit', {
-      targets: ['claude-code'],
-      scope: 'project',
-      cwd: projectDir,
-      flavors: ['python'],
-    });
-
-    // Omitting the flag would reinstall the recorded subset, so "all of it"
-    // needs something to say.
-    await updateCommand(['polyglot-kit'], {
-      targets: ['claude-code'],
-      cwd: projectDir,
-      flavors: ['all'],
-    });
-
-    expect(await exists(projectDir, '.claude/agents/python-typer.md')).toBe(true);
-    expect(await exists(projectDir, '.claude/agents/csharp-analyzer.md')).toBe(true);
-    expect((await records())[0]).not.toHaveProperty('flavors');
   });
 
   it('refuses a flavor the refreshed bundle does not have', async () => {

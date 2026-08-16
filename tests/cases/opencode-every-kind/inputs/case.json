@@ -1,0 +1,6 @@
+{
+  "describes": "every resource kind, installed into OpenCode",
+  "steps": [
+    { "install": "sample-kit", "targets": ["opencode"] }
+  ]
+}

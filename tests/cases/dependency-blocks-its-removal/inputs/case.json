@@ -1,0 +1,8 @@
+{
+  "describes": "removing a dependency something still needs is refused",
+  "steps": [
+    { "register": "team-conventions" },
+    { "install": "sprint-kit", "targets": ["claude-code"] },
+    { "uninstall": "team-conventions", "fails": true }
+  ]
+}

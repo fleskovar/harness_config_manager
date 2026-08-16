@@ -1,0 +1,12 @@
+{
+  "describes": "a file edited after installing survives uninstall, and the record is kept",
+  "recordState": true,
+  "steps": [
+    { "install": "review-kit", "targets": ["claude-code"] },
+    {
+      "appendFile": ".claude/agents/code-reviewer.md",
+      "text": "\n<!-- A note somebody added locally. -->\n"
+    },
+    { "uninstall": "review-kit" }
+  ]
+}

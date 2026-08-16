@@ -1,0 +1,11 @@
+{
+  "describes": "renaming installs under the new name and repoints the instructions at it",
+  "steps": [
+    {
+      "install": "review-kit",
+      "targets": ["claude-code"],
+      "onConflict": "prompt",
+      "resolve": { "choice": "rename", "newName": "review-files" }
+    }
+  ]
+}

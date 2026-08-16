@@ -1,0 +1,9 @@
+{
+  "describes": "uninstalling from one harness leaves the other's files in place",
+  "recordState": true,
+  "steps": [
+    { "install": "review-kit", "targets": ["claude-code"] },
+    { "install": "review-kit", "targets": ["copilot"] },
+    { "uninstall": "review-kit", "targets": ["claude-code"] }
+  ]
+}

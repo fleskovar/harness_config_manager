@@ -1,0 +1,8 @@
+{
+  "agentName": "Cop",
+  "permissions": {
+    "allow": [
+      "Read(**)"
+    ]
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "installations": [
+    {
+      "id": "review-kit@copilot@project",
+      "bundle": "review-kit",
+      "version": "1.0.0",
+      "target": "copilot",
+      "scope": "project",
+      "source": {
+        "type": "local",
+        "bundle": "review-kit"
+      },
+      "receipts": [
+        {
+          "op": "block",
+          "path": ".github/copilot-instructions.md",
+          "blockId": "review-kit/10-conventions",
+          "syntax": "markdown"
+        },
+        {
+          "op": "block",
+          "path": ".github/copilot-instructions.md",
+          "blockId": "review-kit/20-pull-requests",
+          "syntax": "markdown"
+        },
+        {
+          "op": "file",
+          "path": ".github/agents/code-reviewer.agent.md",
+          "hash": "6df542e3f9d15cf2b5b29653673ff445b03bc3b159dd4e8650dd23f274cf63c5"
+        },
+        {
+          "op": "file",
+          "path": ".github/instructions/typescript.instructions.md",
+          "hash": "f90c955e38dcc70f82c297499f17c84b963bb6a0462387cfb064e9a003ca9449"
+        },
+        {
+          "op": "file",
+          "path": ".github/prompts/review-pr.prompt.md",
+          "hash": "ba23a7e59ce5f90c47051acc33a34030695af05bf7a268dc30b0e0a35a95ab1e"
+        },
+        {
+          "op": "file",
+          "path": ".github/skills/dependency-audit/checklist.md",
+          "hash": "672d21322daaec6013ddfe464eef276ae06de325d8edc928c96fa7040de124c9"
+        },
+        {
+          "op": "file",
+          "path": ".github/skills/dependency-audit/SKILL.md",
+          "hash": "78c98948074d2a73480aa82485cbc5fb20e80671f9597a79cc4d8a11a3d91ade"
+        },
+        {
+          "op": "json-array-item",
+          "path": ".github/copilot/settings.json",
+          "pointer": [
+            "permissions",
+            "allow"
+          ],
+          "hashes": [
+            "09d9bde307ba1a1356825f713e71f788219b2015ff97ffe84aac2f1faccaa1ee",
+            "1f1cd7cc578d614f5b5e229faba9c1d261b5889feedad1d39ebeca218af9db17"
+          ]
+        },
+        {
+          "op": "json-value",
+          "path": ".vscode/mcp.json",
+          "pointer": [
+            "servers",
+            "filesystem"
+          ],
+          "hash": "eeb53e47d00b15bc19e4cbcd153baec81343a0264854cf6a87a1c54ec51e8a5b",
+          "hadPrevious": false
+        }
+      ]
+    }
+  ]
+}

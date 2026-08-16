@@ -1,0 +1,17 @@
+{
+  "servers": {
+    "reporter": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@acme/reporter",
+        "--team",
+        "Platform"
+      ],
+      "env": {
+        "REPORTER_TOKEN": "unset"
+      },
+      "type": "stdio"
+    }
+  }
+}

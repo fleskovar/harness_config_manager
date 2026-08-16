@@ -1,0 +1,87 @@
+{
+  "installations": [
+    {
+      "id": "polyglot-kit@claude-code@project",
+      "bundle": "polyglot-kit",
+      "version": "1.0.0",
+      "target": "claude-code",
+      "scope": "project",
+      "source": {
+        "type": "local",
+        "bundle": "polyglot-kit"
+      },
+      "receipts": [
+        {
+          "op": "block",
+          "path": "CLAUDE.md",
+          "blockId": "polyglot-kit/10-conventions",
+          "syntax": "markdown"
+        },
+        {
+          "op": "file",
+          "path": ".claude/agents/code-reviewer.md",
+          "hash": "2d604ae1d95edda11445d5aa526c7543625ab27700a9bc3968a033696b7b9b7f"
+        },
+        {
+          "op": "file",
+          "path": ".claude/agents/python-typer.md",
+          "hash": "69902ee051894dd60f4eadd857fa57bf8fd492fd1df02f5511f5cf20194a7d02"
+        },
+        {
+          "op": "file",
+          "path": ".claude/commands/review-pr.md",
+          "hash": "001d6542da2b7e3e711655571989388739071b17c20045a3cbf9ef9580eca81f"
+        },
+        {
+          "op": "file",
+          "path": ".claude/python/lint.sh",
+          "hash": "c59124dbc68a49fee4c35166482d3869ee28a78da5d16856fbbb2aa4032ecbd5"
+        },
+        {
+          "op": "file",
+          "path": ".claude/rules/python.md",
+          "hash": "0732de5c48e097410cd0eb2e47e43a90c277edc9fdd112d5edc7a3b14212657c"
+        },
+        {
+          "op": "file",
+          "path": ".claude/skills/pr-checklist/SKILL.md",
+          "hash": "21c124dd36f401c1ca1e184d85ef3480b6f78218621bd315aa70b0feb5fb2896"
+        },
+        {
+          "op": "file",
+          "path": ".claude/skills/pytest-runner/failure-modes.md",
+          "hash": "cea67954b44a59bd17f8c68f3489dc0972534a56a9024ecfda1971ce50886ec0"
+        },
+        {
+          "op": "file",
+          "path": ".claude/skills/pytest-runner/SKILL.md",
+          "hash": "d7bc97b0916e9848ed6725782ac6e018ae8d8d6e61caa9742eb6b27a23ab5330"
+        },
+        {
+          "op": "json-array-item",
+          "path": ".claude/settings.json",
+          "pointer": [
+            "permissions",
+            "allow"
+          ],
+          "hashes": [
+            "09d9bde307ba1a1356825f713e71f788219b2015ff97ffe84aac2f1faccaa1ee"
+          ]
+        },
+        {
+          "op": "json-value",
+          "path": ".mcp.json",
+          "pointer": [
+            "mcpServers",
+            "pyright"
+          ],
+          "hash": "6261a232df6d49492596d843c0363b83c0ebc562295231a4922c334173913219",
+          "hadPrevious": false
+        }
+      ],
+      "flavors": [
+        "python"
+      ]
+    }
+  ]
+}

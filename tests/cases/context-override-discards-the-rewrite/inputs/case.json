@@ -1,0 +1,8 @@
+{
+  "describes": "override throws the agent's rewrite away and lays the sections down in order",
+  "steps": [
+    { "install": "review-kit", "targets": ["claude-code"] },
+    { "writeFile": "CLAUDE.md", "from": "rewritten-CLAUDE.md" },
+    { "context": "override", "force": true }
+  ]
+}

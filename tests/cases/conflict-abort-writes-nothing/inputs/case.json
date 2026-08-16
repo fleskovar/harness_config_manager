@@ -1,0 +1,11 @@
+{
+  "describes": "a conflict with --on-conflict abort writes nothing at all",
+  "steps": [
+    {
+      "install": "review-kit",
+      "targets": ["claude-code"],
+      "onConflict": "abort",
+      "fails": true
+    }
+  ]
+}

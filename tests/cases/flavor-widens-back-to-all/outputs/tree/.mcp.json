@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "pyright": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "pyright-mcp",
+        "--project",
+        "."
+      ]
+    }
+  }
+}

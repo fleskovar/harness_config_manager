@@ -1,0 +1,6 @@
+{
+  "describes": "every resource kind, installed into Pi",
+  "steps": [
+    { "install": "sample-kit", "targets": ["pi"] }
+  ]
+}

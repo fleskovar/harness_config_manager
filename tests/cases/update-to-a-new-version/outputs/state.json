@@ -1,0 +1,70 @@
+{
+  "installations": [
+    {
+      "id": "review-kit@claude-code@project",
+      "bundle": "review-kit",
+      "version": "2.0.0",
+      "target": "claude-code",
+      "scope": "project",
+      "source": {
+        "type": "local",
+        "bundle": "review-kit"
+      },
+      "receipts": [
+        {
+          "op": "block",
+          "path": "CLAUDE.md",
+          "blockId": "review-kit/10-conventions",
+          "syntax": "markdown"
+        },
+        {
+          "op": "file",
+          "path": ".claude/agents/change-reviewer.md",
+          "hash": "c4903b357649a1173a4cbbf86bfd49e85ec81667a260a58237bc1dcc58722373"
+        },
+        {
+          "op": "file",
+          "path": ".claude/commands/review-pr.md",
+          "hash": "e0434f1eb99ac96e1344924dc00446f1e985523b9d22e38ba3b25d5f1c72ec5f"
+        },
+        {
+          "op": "file",
+          "path": ".claude/rules/typescript.md",
+          "hash": "7bb6810cea73c7c87bbc692c496947317496f9498280da1500f4a44d909c8760"
+        },
+        {
+          "op": "file",
+          "path": ".claude/skills/dependency-audit/checklist.md",
+          "hash": "9dc601f6eb0abc788d56e020de04477d41ee71aa993976f7f91e01833cc021ff"
+        },
+        {
+          "op": "file",
+          "path": ".claude/skills/dependency-audit/SKILL.md",
+          "hash": "d40c498d8124aa0a4ab999e5decd86ddf4725409d20180eb2948d0e8f450d038"
+        },
+        {
+          "op": "json-array-item",
+          "path": ".claude/settings.json",
+          "pointer": [
+            "permissions",
+            "allow"
+          ],
+          "hashes": [
+            "09d9bde307ba1a1356825f713e71f788219b2015ff97ffe84aac2f1faccaa1ee",
+            "1f1cd7cc578d614f5b5e229faba9c1d261b5889feedad1d39ebeca218af9db17"
+          ]
+        },
+        {
+          "op": "json-value",
+          "path": ".mcp.json",
+          "pointer": [
+            "mcpServers",
+            "filesystem"
+          ],
+          "hash": "b5dfe5a893a631941dcff21f71b1fcdc061db82c8d3a5abe7c28d357f9c04564",
+          "hadPrevious": false
+        }
+      ]
+    }
+  ]
+}

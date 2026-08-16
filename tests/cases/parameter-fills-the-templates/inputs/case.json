@@ -1,0 +1,11 @@
+{
+  "describes": "install --param fills every placeholder the bundle declares",
+  "recordState": true,
+  "steps": [
+    {
+      "install": "branded-kit",
+      "targets": ["claude-code"],
+      "params": ["TEAM=Platform", "AGENT_NAME=Ada", "API_TOKEN=hunter2"]
+    }
+  ]
+}

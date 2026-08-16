@@ -1,0 +1,8 @@
+{
+  "describes": "installing sprint-kit brings team-conventions with it, unasked",
+  "recordState": true,
+  "steps": [
+    { "register": "team-conventions" },
+    { "install": "sprint-kit", "targets": ["claude-code"] }
+  ]
+}

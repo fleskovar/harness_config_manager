@@ -1,0 +1,43 @@
+name: branded-kit
+version: 1.0.0
+description: A kit that introduces itself by name, and knows whose project it is in
+
+flavors:
+  python:
+    description: Python tooling
+    includes:
+      - skills/pytest-runner
+      - assets/run-tests.sh
+
+# Everything this bundle asks for on the way in. Four kinds are on show:
+#
+#   AGENT_NAME, TEAM, TONE  global -- asked for every install
+#   PYTEST_ARGS             flavor-specific -- asked only with --flavor python
+#   CLAUDE_MODEL            harness-specific -- asked only for Claude Code, and
+#                           defaulted elsewhere so no file is left with a hole
+#   API_TOKEN               secret -- used, but never written to the ledger
+#
+# Kept last in the file so a test can append another one to it.
+parameters:
+  AGENT_NAME:
+    description: What the agent should call itself
+    default: Claude
+  TEAM:
+    description: The team that owns this project
+    # No default, so an install has to say -- by flag, file, environment or answer.
+  TONE:
+    description: How the agent should write
+    default: direct
+    choices: [direct, formal, playful]
+  PYTEST_ARGS:
+    description: Extra arguments for pytest
+    default: -q
+    flavors: [python]
+  CLAUDE_MODEL:
+    description: The model this project prefers
+    default: sonnet
+    targets: [claude-code]
+  API_TOKEN:
+    description: Token for the reporting service
+    default: unset
+    secret: true

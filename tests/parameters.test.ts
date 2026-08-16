@@ -311,61 +311,14 @@ describe('where a parameter applies', () => {
 // Rendering an install
 // ---------------------------------------------------------------------------
 
+/**
+ * What an install *writes* is `tests/cases/parameter-fills-the-templates/`,
+ * where every rendered file is a baseline beside the template it came from.
+ * What is left here is what a tree cannot show: the plan's own report of what
+ * it substituted, the hashes that make a reinstall a no-op, and a binary asset
+ * that must come through untouched.
+ */
 describe('what an install writes', () => {
-  it('fills in a context section, which is where the agent reads its own name', async () => {
-    await install({ params: [TEAM, 'AGENT_NAME=Ada'] });
-
-    expect(await readText(projectDir, 'CLAUDE.md')).toContain(
-      'You are a coding agent called Ada, working on a project owned by the\nPlatform team.',
-    );
-  });
-
-  it('fills in a markdown body and its frontmatter alike', async () => {
-    await install({ params: [TEAM, 'AGENT_NAME=Ada'] });
-    const reviewer = await readText(projectDir, '.claude/agents/reviewer.md');
-
-    expect(reviewer).toContain('description: Reviews changes on behalf of the Platform team');
-    expect(reviewer).toContain("You are Ada's reviewer.");
-  });
-
-  it('fills in a skill and the files beside it', async () => {
-    await install({ params: [TEAM, 'AGENT_NAME=Ada'] });
-
-    expect(await readText(projectDir, '.claude/skills/onboarding/SKILL.md')).toContain(
-      'this project is owned by Platform',
-    );
-    // Supporting files are copied byte-for-byte; being text, they are rendered
-    // byte-for-byte too.
-    expect(await readText(projectDir, '.claude/skills/onboarding/welcome.md')).toBe(
-      '# Welcome to Platform\n\nYour agent is Ada. Ask it anything.\n',
-    );
-  });
-
-  it('fills in the string values of an MCP server, arguments and environment both', async () => {
-    await install({ params: [TEAM] });
-    const mcp = await readJson<{ mcpServers: Record<string, { args: string[] }> }>(
-      projectDir,
-      '.mcp.json',
-    );
-
-    expect(mcp.mcpServers.reporter?.args).toEqual(['-y', '@acme/reporter', '--team', 'Platform']);
-  });
-
-  it('fills in a settings value', async () => {
-    await install({ params: [TEAM, 'AGENT_NAME=Ada'] });
-    const settings = await readJson<{ agentName: string }>(projectDir, '.claude/settings.json');
-
-    expect(settings.agentName).toBe('Ada');
-  });
-
-  it('fills in an asset, which is otherwise copied verbatim', async () => {
-    await install({ params: [TEAM] });
-
-    expect(await readText(projectDir, '.claude/run-tests.sh')).toBe(
-      '#!/usr/bin/env bash\n# Test runner for the Platform team.\nexec pytest -q "$@"\n',
-    );
-  });
-
   it('leaves a binary asset byte-for-byte alone', async () => {
     // Decoding a PNG as UTF-8, substituting nothing and re-encoding would
     // corrupt it. A NUL byte is the cheapest reliable evidence that a file is
@@ -377,22 +330,6 @@ describe('what an install writes', () => {
 
     const installed = await fs.readFile(path.join(projectDir, '.claude', 'logo.png'));
     expect(installed.equals(png)).toBe(true);
-  });
-
-  it('leaves an escaped placeholder as the literal it stands for', async () => {
-    await install({ params: [TEAM] });
-
-    expect(await readText(projectDir, '.claude/agents/reviewer.md')).toContain(
-      'documenting this feature: <%AGENT_NAME%>.',
-    );
-  });
-
-  it('takes the default for anything it was not told', async () => {
-    await install({ params: [TEAM] });
-    const claude = await readText(projectDir, 'CLAUDE.md');
-
-    expect(claude).toContain('called Claude');
-    expect(claude).toContain('in a direct style');
   });
 
   it('reports every substitution on the plan, so nothing is applied unseen', async () => {
@@ -422,39 +359,6 @@ describe('what an install writes', () => {
 });
 
 // ---------------------------------------------------------------------------
-
-describe('a parameter narrowed to one harness', () => {
-  it('is asked for where it applies and defaulted where it does not', async () => {
-    await install({ params: [TEAM], targets: ['claude-code', 'copilot'] });
-
-    // CLAUDE_MODEL is only *asked* for on Claude Code, but the file that
-    // mentions it is common -- so Copilot gets the default rather than a hole.
-    expect(await readText(projectDir, 'CLAUDE.md')).toContain('Prefer the sonnet model');
-    expect(await readText(projectDir, '.github/copilot-instructions.md')).toContain(
-      'Prefer the sonnet model',
-    );
-  });
-
-  it('records it only against the harness it belongs to', async () => {
-    await install({ params: [TEAM], targets: ['claude-code', 'copilot'] });
-
-    const claude = (await records()).find((record) => record.target === 'claude-code');
-    const copilot = (await records()).find((record) => record.target === 'copilot');
-
-    expect(claude?.parameters).toHaveProperty('CLAUDE_MODEL', 'sonnet');
-    expect(copilot?.parameters).not.toHaveProperty('CLAUDE_MODEL');
-  });
-
-  it('takes a different value in each harness when told to', async () => {
-    await install({
-      params: [TEAM, 'branded-kit@claude-code:AGENT_NAME=Ada', 'branded-kit@copilot:AGENT_NAME=Cop'],
-      targets: ['claude-code', 'copilot'],
-    });
-
-    expect(await readText(projectDir, 'CLAUDE.md')).toContain('called Ada');
-    expect(await readText(projectDir, '.github/copilot-instructions.md')).toContain('called Cop');
-  });
-});
 
 // ---------------------------------------------------------------------------
 
@@ -818,16 +722,6 @@ describe('asking, and only once', () => {
 // ---------------------------------------------------------------------------
 
 describe('an install with nobody to ask', () => {
-  it('stops on a required parameter, and says every way of supplying it', async () => {
-    await expect(install()).rejects.toThrow(
-      /"branded-kit" needs a value for the parameter "TEAM"/,
-    );
-
-    // Refused before anything is planned, so there is no half-rendered install
-    // to clean up afterwards.
-    expect(await listTree(projectDir)).toEqual([]);
-  });
-
   it('takes the value from the environment, which is what CI has', async () => {
     process.env.HCM_PARAM_TEAM = 'Platform';
     await install();
@@ -841,30 +735,6 @@ describe('an install with nobody to ask', () => {
 // ---------------------------------------------------------------------------
 
 describe('remembering the values', () => {
-  it('records what it rendered with, so nothing has to be told again', async () => {
-    await install({ params: [TEAM, 'AGENT_NAME=Ada'] });
-
-    expect((await records())[0]?.parameters).toEqual({
-      AGENT_NAME: 'Ada',
-      TEAM: 'Platform',
-      TONE: 'direct',
-      PYTEST_ARGS: '-q',
-      CLAUDE_MODEL: 'sonnet',
-    });
-  });
-
-  it('keeps a secret out of the ledger, which is a file people commit', async () => {
-    await install({ params: [TEAM, 'API_TOKEN=hunter2'] });
-
-    expect((await records())[0]?.parameters).not.toHaveProperty('API_TOKEN');
-    // It was still used -- it is only the recording that is refused.
-    const mcp = await readJson<{ mcpServers: Record<string, { env: Record<string, string> }> }>(
-      projectDir,
-      '.mcp.json',
-    );
-    expect(mcp.mcpServers.reporter?.env.REPORTER_TOKEN).toBe('hunter2');
-  });
-
   it('records nothing at all for a bundle that asks for nothing', async () => {
     const plain = await copyFixture('bundles/review-kit', path.join(workspace, 'review-kit'));
     await installCommand(plain, { targets: ['claude-code'], scope: 'project', cwd: projectDir });
@@ -903,25 +773,6 @@ describe('updating a customised installation', () => {
       ),
     );
   };
-
-  it('renders the new version with the same values, without being told again', async () => {
-    await register();
-    await installCommand('branded-kit', {
-      targets: ['claude-code'],
-      scope: 'project',
-      cwd: projectDir,
-      params: [TEAM, 'AGENT_NAME=Ada'],
-    });
-
-    await publish('## Who you are\n\nYou are <%AGENT_NAME%>, and you answer to <%TEAM%>.\n');
-    await updateCommand([], { targets: ['claude-code'], cwd: projectDir });
-
-    // The new text, the old answers. An update that renamed the agent would be
-    // worse than no update at all.
-    expect(await readText(projectDir, 'CLAUDE.md')).toContain('You are Ada, and you answer to Platform.');
-    expect((await records())[0]?.version).toBe('1.1.0');
-    expect((await records())[0]?.parameters).toHaveProperty('AGENT_NAME', 'Ada');
-  });
 
   it('changes one when told to, and records the change', async () => {
     await register();

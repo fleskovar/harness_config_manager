@@ -1,0 +1,8 @@
+{
+  "describes": "uninstalling from a project hcm found empty leaves it empty again",
+  "recordState": true,
+  "steps": [
+    { "install": "review-kit", "targets": ["claude-code"] },
+    { "uninstall": "review-kit" }
+  ]
+}

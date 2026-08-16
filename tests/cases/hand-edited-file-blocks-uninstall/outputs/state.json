@@ -1,0 +1,76 @@
+{
+  "installations": [
+    {
+      "id": "review-kit@claude-code@project",
+      "bundle": "review-kit",
+      "version": "1.0.0",
+      "target": "claude-code",
+      "scope": "project",
+      "source": {
+        "type": "local",
+        "bundle": "review-kit"
+      },
+      "receipts": [
+        {
+          "op": "block",
+          "path": "CLAUDE.md",
+          "blockId": "review-kit/10-conventions",
+          "syntax": "markdown"
+        },
+        {
+          "op": "block",
+          "path": "CLAUDE.md",
+          "blockId": "review-kit/20-pull-requests",
+          "syntax": "markdown"
+        },
+        {
+          "op": "file",
+          "path": ".claude/agents/code-reviewer.md",
+          "hash": "87bcb62b17f68ea4b4f0e92f87dd62c0bcb9c2708e1670fd9605918016259acf"
+        },
+        {
+          "op": "file",
+          "path": ".claude/commands/review-pr.md",
+          "hash": "dadb7c1aa3eaf147d7abba394f196a9786f6a403aa960a58d68abf099036f32a"
+        },
+        {
+          "op": "file",
+          "path": ".claude/rules/typescript.md",
+          "hash": "7bb6810cea73c7c87bbc692c496947317496f9498280da1500f4a44d909c8760"
+        },
+        {
+          "op": "file",
+          "path": ".claude/skills/dependency-audit/checklist.md",
+          "hash": "672d21322daaec6013ddfe464eef276ae06de325d8edc928c96fa7040de124c9"
+        },
+        {
+          "op": "file",
+          "path": ".claude/skills/dependency-audit/SKILL.md",
+          "hash": "df22a61a4421e18afbb469872445b35a73549f17ddbf3035c475e6b6a650eaeb"
+        },
+        {
+          "op": "json-array-item",
+          "path": ".claude/settings.json",
+          "pointer": [
+            "permissions",
+            "allow"
+          ],
+          "hashes": [
+            "09d9bde307ba1a1356825f713e71f788219b2015ff97ffe84aac2f1faccaa1ee",
+            "1f1cd7cc578d614f5b5e229faba9c1d261b5889feedad1d39ebeca218af9db17"
+          ]
+        },
+        {
+          "op": "json-value",
+          "path": ".mcp.json",
+          "pointer": [
+            "mcpServers",
+            "filesystem"
+          ],
+          "hash": "b5dfe5a893a631941dcff21f71b1fcdc061db82c8d3a5abe7c28d357f9c04564",
+          "hadPrevious": false
+        }
+      ]
+    }
+  ]
+}

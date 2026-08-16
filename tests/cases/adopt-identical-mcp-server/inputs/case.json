@@ -1,0 +1,5 @@
+{
+  "describes": "an item already there and identical is adopted, not rewritten",
+  "recordState": true,
+  "steps": [{ "install": "review-kit", "targets": ["claude-code"] }]
+}

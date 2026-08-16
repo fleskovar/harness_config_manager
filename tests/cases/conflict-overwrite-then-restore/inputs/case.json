@@ -1,0 +1,7 @@
+{
+  "describes": "--on-conflict overwrite wins, and uninstall puts the old value back",
+  "steps": [
+    { "install": "review-kit", "targets": ["claude-code"], "onConflict": "overwrite" },
+    { "uninstall": "review-kit" }
+  ]
+}

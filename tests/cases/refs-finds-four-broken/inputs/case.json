@@ -1,0 +1,4 @@
+{
+  "describes": "refs check reports the four broken references and suggests what each meant",
+  "steps": [{ "refs": "broken-refs-kit" }]
+}

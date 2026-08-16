@@ -1,0 +1,13 @@
+{
+  "describes": "the retry that says --force takes the edited file too",
+  "recordState": true,
+  "steps": [
+    { "install": "review-kit", "targets": ["claude-code"] },
+    {
+      "appendFile": ".claude/agents/code-reviewer.md",
+      "text": "\n<!-- A note somebody added locally. -->\n"
+    },
+    { "uninstall": "review-kit" },
+    { "uninstall": "review-kit", "force": true }
+  ]
+}

@@ -20,9 +20,14 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
+    "test:cases": "vitest run tests/case-runner.test.ts",
+    "test:case": "vitest run tests/case-runner.test.ts -t",
+    "bless": "node -e \"process.env.UPDATE_BASELINES=1;require('child_process').execSync('npx vitest run tests/case-runner.test.ts',{stdio:'inherit',env:{...process.env,UPDATE_BASELINES:'1'}})\"",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "debug:case": "node --inspect-brk --import tsx tests/run-case.ts",
+    "case": "tsx tests/run-case.ts"
   },
   "dependencies": {
     "commander": "^12.1.0",

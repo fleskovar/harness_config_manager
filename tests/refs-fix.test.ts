@@ -90,40 +90,6 @@ function keepBestCandidate(fixes: FixFile): FixFile {
 // ---------------------------------------------------------------------------
 
 describe('hcm refs check, on a bundle with four broken references', () => {
-  it('reports those four and no others', async () => {
-    const result = await scanReferences(kit);
-
-    expect(
-      result.broken.map((ref) => ({ file: ref.fileRelative, line: ref.line, broken: ref.ref })),
-    ).toEqual(EXPECTED.map(({ file, line, broken }) => ({ file, line, broken })));
-  });
-
-  it('suggests the file each one meant, best first', async () => {
-    const result = await scanReferences(kit);
-
-    for (const expected of EXPECTED) {
-      const broken = result.broken.find((ref) => ref.ref === expected.broken);
-      expect(broken?.suggestions[0]?.ref, `best fix for ${expected.broken}`).toBe(expected.fix);
-    }
-  });
-
-  it('says nothing about the paths in the bundle that are not references', async () => {
-    const reported = (await scanReferences(kit)).broken.map((ref) => ref.ref);
-
-    // Every one of these is in the fixture on purpose. In order: a path inside a
-    // fenced code block, a URL, two well-known project filenames the skill only
-    // talks about, and an after-installation path in the README.
-    for (const quiet of [
-      'docs/release-notes.md',
-      'https://example.com/style/guide.md',
-      'package.json',
-      'tsconfig.json',
-      '.claude/agents/',
-    ]) {
-      expect(reported, `${quiet} should not be reported`).not.toContain(quiet);
-    }
-  });
-
   it('resolves the references in the bundle that are correct', async () => {
     const result = await scanReferences(kit);
     const resolved = result.refs.filter((ref) => ref.target !== undefined).map((ref) => ref.ref);

@@ -1,0 +1,1 @@
+Other installed bundles still depend on this one: team-conventions (claude-code) is required by sprint-kit
