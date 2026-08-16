@@ -1,3 +1,0 @@
-name: invalid-kit
-version: 1.0.0
-description: "A bundle with three deliberate mistakes in it, for hcm validate."
