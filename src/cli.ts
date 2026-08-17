@@ -301,11 +301,13 @@ program
     ]),
   )
   .option('--json', 'machine-readable output')
+  .option('--descriptions', 'include each bundle\'s description')
   .action(async (options) => {
     await listCommand({
       installed: options.installed,
       scope: options.scope as Scope | 'all' | undefined,
       json: options.json,
+      descriptions: options.descriptions,
       cwd,
     });
   });

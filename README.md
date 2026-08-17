@@ -1051,7 +1051,7 @@ hcm install my-kit --on-conflict prompt     # ask even where hcm would not have
 | `hcm install <bundle...>` | Install, with whatever it requires. `-t/--target`, `-f/--flavor`, `-s/--scope`, `--param`, `--params-file`, `--no-prompt`, `--dry-run`, `--force`, `--on-conflict`, `--refresh`, `--no-deps`, `--pi-subagents` |
 | `hcm update [<bundle...>\|all]` | Re-read bundles and reinstall them in place. No argument: everything installed here; `all`: everything registered. `-t`, `-f`, `-s`, `--param`, `--params-file`, `--reconfigure`, `--no-prompt`, `--dry-run`, `--force`, `--on-conflict`, `--pi-subagents` |
 | `hcm uninstall <bundle...>` | Remove exactly what was installed. `-t`, `-s`, `--dry-run`, `--force`, `--cascade`, `--ignore-dependents`, `--keep-orphans` |
-| `hcm list` | Registered bundles (`●` = installed somewhere) |
+| `hcm list` | Registered bundles (`●` = installed somewhere). `--descriptions`, `--json` |
 | `hcm list --installed` | Installed bundles. `--scope project\|user\|all`, `--json` |
 | `hcm info <bundle...>` | Contents, its flavors and parameters, plus where every item would land in each target. `-f/--flavor`, `--param`, `--params-file`, `--pi-subagents` |
 | `hcm params [list] [bundle...]` | The parameter values each installation was rendered with. `-t`, `-s`, `--json` |

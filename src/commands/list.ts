@@ -10,6 +10,7 @@ export interface ListOptions {
   installed?: boolean;
   scope?: Scope | 'all';
   json?: boolean;
+  descriptions?: boolean;
   cwd: string;
 }
 
@@ -58,7 +59,9 @@ async function listAvailable(options: ListOptions): Promise<void> {
         `${color.bold(entry.name.padEnd(nameWidth))}${version}${mode}`,
     );
     const indent = ' '.repeat(idWidth + 4);
-    if (entry.description) log.plain(`${indent}${color.dim(entry.description)}`);
+    if (options.descriptions && entry.description) {
+      log.plain(`${indent}${color.dim(entry.description)}`);
+    }
     log.plain(`${indent}${color.dim(describeSource(entry.source))}`);
     // The parts it can be installed as -- "what can I install?" has a longer
     // answer than the name for a bundle that offers flavors.
