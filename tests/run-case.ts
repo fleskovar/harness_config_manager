@@ -337,7 +337,10 @@ async function runStep(step: CaseStep, ctx: RunContext): Promise<void> {
 
   if ('writeFile' in step) {
     const body =
-      step.text ?? (await fs.readFile(path.join(ctx.caseDir, 'inputs', step.from as string), 'utf8'));
+      step.text ??
+      normaliseText(
+        await fs.readFile(path.join(ctx.caseDir, 'inputs', step.from as string), 'utf8'),
+      );
     const target = path.join(ctx.projectDir, ...step.writeFile.split('/'));
     await fs.mkdir(path.dirname(target), { recursive: true });
     await fs.writeFile(target, body, 'utf8');
@@ -483,8 +486,31 @@ async function copyDir(from: string, to: string): Promise<void> {
     const source = path.join(from, entry.name);
     const target = path.join(to, entry.name);
     if (entry.isDirectory()) await copyDir(source, target);
-    else await fs.copyFile(source, target);
+    else await copyFileNormalising(source, target);
   }
+}
+
+/**
+ * Copy one file, normalising CRLF to LF when it is text.
+ *
+ * A fresh Windows checkout with `core.autocrlf=true` hands the case inputs back
+ * as CRLF. hcm hashes and writes whatever bytes it reads, so that checkout
+ * would change every `file` receipt hash in `state.json`. Normalising here
+ * keeps a case identical on any machine -- and honours the `readTree` contract
+ * that hcm writes `\n`.
+ *
+ * Binary files are copied byte-for-byte: anything containing a NUL byte could
+ * not survive a UTF-8 round trip, and git would not have re-endowed it anyway.
+ */
+async function copyFileNormalising(from: string, to: string): Promise<void> {
+  const bytes = await fs.readFile(from);
+  if (bytes.includes(0)) await fs.writeFile(to, bytes);
+  else await fs.writeFile(to, normaliseText(bytes.toString('utf8')), 'utf8');
+}
+
+/** CRLF -> LF, the one line-ending difference git's autocrlf introduces. */
+function normaliseText(text: string): string {
+  return text.replace(/\r\n/g, '\n');
 }
 
 // ---------------------------------------------------------------------------

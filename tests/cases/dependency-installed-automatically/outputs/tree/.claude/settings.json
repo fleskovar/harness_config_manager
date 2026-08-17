@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git log:*)",
+      "WebFetch(domain:jira.example.com)",
+      "Bash(npm test:*)"
+    ]
+  }
+}

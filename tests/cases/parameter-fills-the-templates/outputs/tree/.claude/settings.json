@@ -1,0 +1,8 @@
+{
+  "agentName": "Ada",
+  "permissions": {
+    "allow": [
+      "Read(**)"
+    ]
+  }
+}
