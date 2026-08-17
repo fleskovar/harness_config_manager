@@ -55,13 +55,10 @@ help:
 
 ## ---------------------------------------------------------------- dev environment
 
-# The test toolchain (vitest -> vite -> rolldown) imports styleText from
-# node:util, which only exists from Node 20.12 on, and vite itself asks for
-# 20.19+. npm downgrades that mismatch to a warning you scroll past, so the
-# first sign of it is an unreadable crash three layers down in `make check`.
-# Check it up front instead, and say what to do about it.
+# The toolchain and the CLI target Node 20+. Check it up front so a too-old
+# Node fails with a clear message instead of a crash deep inside a dependency.
 check-node:
-	@$(NODE) -e "var v=process.versions.node,p=v.split('.').map(Number),ok=(p[0]===20&&p[1]>=19)||(p[0]===22&&p[1]>=12)||p[0]>22;if(!ok){console.error('Node '+v+' is too old for this project. Install Node 20.19+, 22.12+ or 24 LTS and try again.');process.exit(1)}"
+	@$(NODE) -e "var v=process.versions.node,p=v.split('.').map(Number),ok=p[0]>=20;if(!ok){console.error('Node '+v+' is too old for this project. Install Node 20 or newer and try again.');process.exit(1)}"
 
 # `npm ci` is reproducible but needs the lockfile; fall back when it is absent.
 ifeq ($(wildcard package-lock.json),)

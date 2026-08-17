@@ -16,8 +16,8 @@ Supported targets:
 
 ## Install
 
-Requires Node 20.19+, 22.12+, or 24 LTS. `make setup` checks this first and
-tells you what to do if your Node is too old.
+Requires Node 20 or newer. `make setup` checks this first and tells you what
+to do if your Node is too old.
 
 ```bash
 make setup        # install dependencies, build, run the checks
