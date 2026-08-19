@@ -478,10 +478,16 @@ export async function installInto(
 
   const receipts = await applyPlan(plan);
 
-  // An explicit install of something previously pulled in as a dependency makes
-  // it the user's: it should survive the bundle that first needed it.
+  // An installation is automatic only if it is being pulled in as a dependency
+  // *and* was not already the user's. Both directions matter: installing by
+  // name something that was pulled in before makes it the user's, and a bundle
+  // installed by name first stays theirs when a later bundle turns out to
+  // require it. A record with no `auto` flag is an explicit installation, so
+  // the flag is compared rather than defaulted -- `previous.auto ?? true` would
+  // read every explicit installation as automatic and let the next
+  // "hcm uninstall <dependent>" take it away.
   const previous = await findInstallation(options.scope, options.cwd, bundle.manifest.name, targetId);
-  const auto = (role.auto ?? false) && (previous?.auto ?? true);
+  const auto = (role.auto ?? false) && (previous ? previous.auto === true : true);
 
   await upsertInstallation(options.scope, options.cwd, {
     id: installationId(bundle.manifest.name, targetId, options.scope),

@@ -20,9 +20,9 @@ import { loadBundle } from '../src/core/bundle.js';
 import { resolveDependencyGraph } from '../src/core/deps.js';
 import { HcmError } from '../src/core/errors.js';
 import { configureLogger } from '../src/core/logger.js';
-import { addToRegistry } from '../src/core/registry.js';
+import { addToRegistry, entryDir } from '../src/core/registry.js';
 import { readState } from '../src/core/state.js';
-import type { InstallationRecord } from '../src/core/types.js';
+import type { InstallationRecord, RegistryEntry } from '../src/core/types.js';
 
 let workspace: string;
 let projectDir: string;
@@ -146,6 +146,45 @@ describe('resolution', () => {
     });
 
     const graph = await resolveDependencyGraph([await loadBundle(consumer)], projectDir);
+
+    expect(graph.byName.get('jira-board')?.via).toBe('source');
+  });
+
+  it('reads a relative source against the manifest, not the working directory', async () => {
+    // The shared bundle sits two folders up from its consumer and nowhere else:
+    // not registered, not a sibling. A relative "source" is the only route to
+    // it, and it has to mean the same thing from any directory hcm is run in --
+    // here `projectDir`, which is not even in the same branch of the tree.
+    await makeBundle('jira-board', { at: path.join(workspace, 'shared', 'jira-board') });
+    const consumer = await makeBundle('sprint-kit', {
+      at: path.join(workspace, 'apps', 'sprint-kit'),
+      dependencies: '  - name: jira-board\n    source: ../../shared/jira-board',
+    });
+
+    const graph = await resolveDependencyGraph([await loadBundle(consumer)], projectDir);
+
+    expect(graph.byName.get('jira-board')?.via).toBe('source');
+    expect(graph.order.map((entry) => entry.bundle.manifest.name)).toEqual([
+      'jira-board',
+      'sprint-kit',
+    ]);
+  });
+
+  it("reads a registered bundle's relative source against the folder it came from", async () => {
+    // A snapshot in the store has no neighbours, so the path is read a second
+    // time against the directory the snapshot was taken from -- the same reason
+    // `fromSibling` looks in two places.
+    await makeBundle('jira-board', { at: path.join(workspace, 'shared', 'jira-board') });
+    const consumer = await makeBundle('sprint-kit', {
+      at: path.join(workspace, 'apps', 'sprint-kit'),
+      dependencies: '  - name: jira-board\n    source: ../../shared/jira-board',
+    });
+    const [entry] = await addToRegistry(consumer, workspace);
+
+    // Loaded the way `fromRegistry` loads it: the files from the store, the
+    // source from the registry entry.
+    const stored = await loadBundle(await entryDir(entry as RegistryEntry), entry?.source);
+    const graph = await resolveDependencyGraph([stored], projectDir);
 
     expect(graph.byName.get('jira-board')?.via).toBe('source');
   });
@@ -305,6 +344,87 @@ describe('installing', () => {
     for (const record of records) {
       expect(record.receipts.some((receipt) => receipt.path === skill)).toBe(true);
     }
+  });
+
+  it('installs a dependent named by its registry id, dependency and all', async () => {
+    // Ids are what `hcm registry add` prints and what people type; a dependency
+    // is still looked up by name, since an id is a handle on this machine only.
+    await addToRegistry(await makeBundle('jira-board'), workspace);
+    const [entry] = await addToRegistry(
+      await makeBundle('sprint-kit', { dependencies: '  - jira-board@^1.0.0' }),
+      workspace,
+    );
+
+    await install((entry as RegistryEntry).id);
+
+    expect(await installedNames()).toEqual(['jira-board', 'sprint-kit']);
+  });
+
+  it('installs a registered dependency whose source folder has since gone', async () => {
+    // Registering copies the bundle into the store, and that copy is what an
+    // install reads. A dependency that was registered from a folder somebody
+    // has since deleted still installs.
+    const board = await makeBundle('jira-board', { at: path.join(workspace, 'gone', 'jira-board') });
+    await addToRegistry(board, workspace);
+    await fs.rm(path.join(workspace, 'gone'), { recursive: true, force: true });
+
+    await addToRegistry(await makeBundle('sprint-kit', { dependencies: '  - jira-board' }), workspace);
+    await install('sprint-kit');
+
+    expect(await installedNames()).toEqual(['jira-board', 'sprint-kit']);
+    expect(await exists('.claude/agents/jira-board-worker.md')).toBe(true);
+  });
+
+  it('takes a --dev dependency from the working copy, edits and all', async () => {
+    // A dev entry is the bundle you are writing, read in place. An edit made
+    // after registering it has to reach the dependent's install.
+    const board = await makeBundle('jira-board');
+    await addToRegistry(board, workspace, { dev: true });
+    await fs.writeFile(
+      path.join(board, 'subagents', 'jira-board-worker.md'),
+      '---\ndescription: Works on jira-board\n---\n\nEdited after registering.\n',
+    );
+
+    await addToRegistry(await makeBundle('sprint-kit', { dependencies: '  - jira-board' }), workspace);
+    await install('sprint-kit');
+
+    const worker = await fs.readFile(
+      path.join(projectDir, '.claude', 'agents', 'jira-board-worker.md'),
+      'utf8',
+    );
+    expect(worker).toContain('Edited after registering');
+  });
+
+  it('leaves a dependency the user installed first as theirs', async () => {
+    // The common order in practice: install the shared kit, then something that
+    // needs it. The second install must not quietly demote the first to
+    // "automatic", or uninstalling the dependent would take it away.
+    await addToRegistry(await makeBundle('jira-board'), workspace);
+    await addToRegistry(await makeBundle('sprint-kit', { dependencies: '  - jira-board' }), workspace);
+
+    await install('jira-board');
+    await install('sprint-kit');
+
+    expect((await installed()).find((record) => record.bundle === 'jira-board')?.auto).toBeUndefined();
+
+    await uninstall('sprint-kit');
+    expect(await installedNames()).toEqual(['jira-board']);
+    expect(await exists('.claude/agents/jira-board-worker.md')).toBe(true);
+  });
+
+  it('installs a dependency named by a relative source, from any directory', async () => {
+    // The install runs in `projectDir`, which is nowhere near either bundle:
+    // the path in the manifest is read against the manifest.
+    await makeBundle('jira-board', { at: path.join(workspace, 'shared', 'jira-board') });
+    const consumer = await makeBundle('sprint-kit', {
+      at: path.join(workspace, 'apps', 'sprint-kit'),
+      dependencies: '  - name: jira-board\n    source: ../../shared/jira-board',
+    });
+
+    await install(consumer);
+
+    expect(await installedNames()).toEqual(['jira-board', 'sprint-kit']);
+    expect(await exists('.claude/agents/jira-board-worker.md')).toBe(true);
   });
 
   it('--no-deps installs only what was named', async () => {

@@ -1,0 +1,82 @@
+{
+  "installations": [
+    {
+      "id": "sprint-kit@claude-code@project",
+      "bundle": "sprint-kit",
+      "version": "1.0.0",
+      "target": "claude-code",
+      "scope": "project",
+      "source": {
+        "type": "local",
+        "bundle": "sprint-kit"
+      },
+      "receipts": [
+        {
+          "op": "file",
+          "path": ".claude/agents/sprint-planner.md",
+          "hash": "fe3abaf888fda7b58396c30b901fab5574b16c0755e4fa31feaa476936ef1d48"
+        },
+        {
+          "op": "file",
+          "path": ".claude/skills/jira-board/SKILL.md",
+          "hash": "65c6fc40dc7014f50281bfaf90bb5bf23107c8810e65b9659c1d9ded223534b5"
+        },
+        {
+          "op": "json-array-item",
+          "path": ".claude/settings.json",
+          "pointer": [
+            "permissions",
+            "allow"
+          ],
+          "hashes": [
+            "1f1cd7cc578d614f5b5e229faba9c1d261b5889feedad1d39ebeca218af9db17",
+            "9494d97a3a0cffe69a34b9bae743f33a17fbc4d8f7e5ffe7b50fadc9501013c5"
+          ]
+        }
+      ],
+      "dependencies": [
+        {
+          "name": "team-conventions",
+          "version": "1.0.0",
+          "range": "^1.0.0"
+        }
+      ]
+    },
+    {
+      "id": "team-conventions@claude-code@project",
+      "bundle": "team-conventions",
+      "version": "1.0.0",
+      "target": "claude-code",
+      "scope": "project",
+      "source": {
+        "type": "local",
+        "bundle": "team-conventions"
+      },
+      "receipts": [
+        {
+          "op": "file",
+          "path": ".claude/agents/ticket-triager.md",
+          "hash": "59de9e205327fc76eabbeb5eee5a3cdb5526e40177a86b7d9b9707daf920f393"
+        },
+        {
+          "op": "file",
+          "path": ".claude/skills/jira-board/SKILL.md",
+          "hash": "65c6fc40dc7014f50281bfaf90bb5bf23107c8810e65b9659c1d9ded223534b5"
+        },
+        {
+          "op": "json-array-item",
+          "path": ".claude/settings.json",
+          "pointer": [
+            "permissions",
+            "allow"
+          ],
+          "hashes": [
+            "9494d97a3a0cffe69a34b9bae743f33a17fbc4d8f7e5ffe7b50fadc9501013c5",
+            "100f63320fe282e79a42ccffa0a737826e650923c9c1be4965e3ac48e1cd165c"
+          ]
+        }
+      ],
+      "auto": true
+    }
+  ]
+}

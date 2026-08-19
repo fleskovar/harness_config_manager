@@ -78,6 +78,12 @@ my-kit v1.0.0
 !   "my-kit" requires the bundle "jira-board", which hcm cannot find
 ```
 
+A `source` is a GitHub reference (`acme/agent-kits/db-kit`) or a path. A
+relative path is read against the manifest that declares it, so
+`../shared/jira-board` means that folder beside your bundle whichever directory
+the user runs `hcm` from. Publishing to somebody else's machine needs the
+GitHub form.
+
 **Version ranges** are the familiar subset: `1.2.3`, `^1.2.3`, `~1.2.3`,
 `>=1.2.3`, `1.2.x`, `*`, and those joined by a space (*and*) or `||` (*or*). A
 range hcm does not understand is refused when the manifest is read, rather than

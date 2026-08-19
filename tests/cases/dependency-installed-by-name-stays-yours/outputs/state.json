@@ -1,0 +1,36 @@
+{
+  "installations": [
+    {
+      "id": "team-conventions@claude-code@project",
+      "bundle": "team-conventions",
+      "version": "1.0.0",
+      "target": "claude-code",
+      "scope": "project",
+      "source": {
+        "type": "local",
+        "bundle": "team-conventions"
+      },
+      "receipts": [
+        {
+          "op": "file",
+          "path": ".claude/agents/ticket-triager.md",
+          "hash": "59de9e205327fc76eabbeb5eee5a3cdb5526e40177a86b7d9b9707daf920f393"
+        },
+        {
+          "op": "file",
+          "path": ".claude/skills/jira-board/SKILL.md",
+          "hash": "65c6fc40dc7014f50281bfaf90bb5bf23107c8810e65b9659c1d9ded223534b5"
+        },
+        {
+          "op": "json-array-item",
+          "path": ".claude/settings.json",
+          "pointer": [
+            "permissions",
+            "allow"
+          ],
+          "hashes": []
+        }
+      ]
+    }
+  ]
+}

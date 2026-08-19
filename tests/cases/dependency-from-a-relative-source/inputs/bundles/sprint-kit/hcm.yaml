@@ -1,0 +1,10 @@
+name: sprint-kit
+version: 1.0.0
+description: Sprint planning on top of the team's JIRA conventions.
+dependencies:
+  - name: team-conventions
+    version: ^1.0.0
+    # Read against this manifest, wherever hcm is run from -- the bundle it
+    # names is one folder up and inside "shared/", so it is not a sibling and
+    # nothing is registered.
+    source: ../shared/team-conventions

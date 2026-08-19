@@ -387,9 +387,12 @@ sprint-kit v1.0.0 (…/sprint-kit)
 registry, a sibling folder in the same collection, and the `source` the
 dependency itself names. So a monorepo of bundles resolves with nothing
 registered and no network, and a published bundle can point at where its
-dependency lives. `hcm validate` tries the same lookup and tells you when it
-fails — which is the moment to add a `source`, since what resolves on your
-machine because you registered it resolves nowhere else.
+dependency lives. A `source` written as a path (`../shared/jira-board`) is read
+against the manifest that declares it, so it means the same thing whichever
+directory `hcm` is run from; a bare `owner/repo/path` is GitHub.
+`hcm validate` tries the same lookup and tells you when it fails — which is the
+moment to add a `source`, since what resolves on your machine because you
+registered it resolves nowhere else.
 
 **Versions** are the usual subset: `1.2.3`, `^1.2.3`, `~1.2.3`, `>=1.2.3`,
 `1.2.x`, `*`, joined with a space for *and* and `||` for *or*. One version of a

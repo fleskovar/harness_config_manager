@@ -1,0 +1,11 @@
+{
+  "describes": "a bundle installed by name stays the user's when a later bundle requires it",
+  "recordState": true,
+  "steps": [
+    { "register": "team-conventions" },
+    { "register": "sprint-kit" },
+    { "install": "team-conventions", "targets": ["claude-code"] },
+    { "install": "sprint-kit", "targets": ["claude-code"] },
+    { "uninstall": "sprint-kit" }
+  ]
+}

@@ -1,0 +1,5 @@
+name: sprint-kit
+version: 1.0.0
+description: Sprint planning on top of the team's JIRA conventions.
+dependencies:
+  - team-conventions@^1.0.0

@@ -1,0 +1,7 @@
+{
+  "describes": "a dependency named by a relative source is found from a project directory elsewhere",
+  "recordState": true,
+  "steps": [
+    { "install": "sprint-kit", "targets": ["claude-code"] }
+  ]
+}

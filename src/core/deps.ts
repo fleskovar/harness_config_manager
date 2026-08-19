@@ -321,22 +321,68 @@ async function findSibling(
 
 async function fromDeclaredSource(
   dependency: BundleDependency,
-  _requirer: LoadedBundle,
-  cwd: string,
+  requirer: LoadedBundle,
+  _cwd: string,
   options: ResolveOptions,
 ): Promise<Candidate | undefined> {
   if (!dependency.source) return undefined;
 
-  const source = parseSource(dependency.source, cwd);
-  const bundles = await loadBundlesFrom(source, options);
+  const failures: Error[] = [];
 
-  // A collection is allowed as a source; take the bundle that has the name.
-  const bundle =
-    bundles.find((candidate) => candidate.manifest.name === dependency.name) ??
-    (bundles.length === 1 ? bundles[0] : undefined);
-  if (!bundle) return undefined;
+  for (const source of declaredSources(dependency.source, requirer)) {
+    let bundles: LoadedBundle[];
+    try {
+      bundles = await loadBundlesFrom(source, options);
+    } catch (error) {
+      // One base out of two not being there is ordinary; the reason is kept in
+      // case none of them works out.
+      failures.push(error as Error);
+      continue;
+    }
 
-  return { bundle, via: 'source', where: describeSource(source) };
+    // A collection is allowed as a source; take the bundle that has the name.
+    const bundle =
+      bundles.find((candidate) => candidate.manifest.name === dependency.name) ??
+      (bundles.length === 1 ? bundles[0] : undefined);
+    if (!bundle) continue;
+
+    return { bundle, via: 'source', where: describeSource(source) };
+  }
+
+  if (failures.length > 0) throw failures[0];
+  return undefined;
+}
+
+/**
+ * What a `source` in a manifest can point at.
+ *
+ * A GitHub source means one thing wherever it is read. A *relative* path means
+ * nothing on its own, so it is read against the bundle that wrote it -- and,
+ * when that bundle is a snapshot in the store, against the directory the
+ * snapshot was taken from as well, which is where its neighbours still are.
+ *
+ * The working directory is deliberately not one of them: `hcm install` has to
+ * give the same answer from the project it is installing into as from the
+ * folder the bundles live in.
+ */
+function declaredSources(declared: string, requirer: LoadedBundle): BundleSource[] {
+  const bases = [requirer.root];
+  if (requirer.source.type === 'local') bases.push(requirer.source.path);
+
+  const sources: BundleSource[] = [];
+  const seen = new Set<string>();
+
+  for (const base of bases) {
+    // Absolute paths and GitHub sources ignore the base, so two bases usually
+    // come to one source; a repeat would only re-download it.
+    const source = parseSource(declared, path.resolve(base));
+    const key = JSON.stringify(source);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    sources.push(source);
+  }
+
+  return sources;
 }
 
 // ---------------------------------------------------------------------------
