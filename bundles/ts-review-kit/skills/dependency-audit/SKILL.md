@@ -4,17 +4,23 @@ description: Audit third-party dependencies for known vulnerabilities, unmaintai
 
 # Dependency audit
 
-Work through the checklist in `checklist.md`, then report what you found. Match
-the tone the reviewer uses in `subagents/code-reviewer.md`.
+Work through the checklist in `./checklist.md`, then report what you found.
+Match the tone the reviewer uses in
+[the code reviewer](subagents/code-reviewer.md).
 
-Both are written from the bundle root, and `hcm` rewrites each one relative to
-wherever this file lands. The checklist is installed beside it and stays as
-written; the reviewer moves, so the second becomes:
+The first is written against this file, the second from the bundle root, and
+`hcm` accepts either and rewrites both relative to wherever this file lands. The
+checklist is installed beside it and stays as written; the reviewer moves, so
+the second becomes:
 
 ```
 Claude Code   ../../agents/code-reviewer.md
 Reasonix      ../code-reviewer/SKILL.md      (a subagent is a skill there)
 ```
+
+Both forms are what `hcm refs check` reads: the `./` says outright that this is
+a path, and a link's target is one by construction. A bare `checklist.md` would
+still be rewritten on the way in, but the checker would take it for prose.
 
 ## Steps
 

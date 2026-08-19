@@ -1,0 +1,17 @@
+{
+  "scope": {
+    "links": false,
+    "allPaths": false,
+    "strict": false
+  },
+  "broken": [
+    {
+      "file": "skills/scaffold/SKILL.md",
+      "ref": "context/naming.md",
+      "syntax": "link",
+      "suggestions": [
+        "context/naming-conventions.md"
+      ]
+    }
+  ]
+}

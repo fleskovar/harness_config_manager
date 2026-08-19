@@ -43,9 +43,30 @@ export {
 } from './core/parameters.js';
 export { buildPlan } from './core/planner.js';
 export { buildRefMap, remapReferences } from './core/refmap.js';
+export type {
+  BrokenRef,
+  FoundRef,
+  RefConfidence,
+  RefEdit,
+  RefPolicy,
+  RefScope,
+  RefSuggestion,
+  RefSyntax,
+  ResolvedRef,
+  ResolveOptions,
+  ScanOptions,
+  ScanResult,
+} from './core/refs.js';
 export {
   applyRefEdits,
+  DECLARED_SYNTAXES,
   extractRefs,
+  INSTALL_POLICY,
+  isExplicitlyRelative,
+  isInScope,
+  LINK_SYNTAXES,
+  REF_SYNTAXES,
+  refPolicy,
   resolveRef,
   scanReferences,
   suggestFixes,

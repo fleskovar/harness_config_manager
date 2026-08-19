@@ -27,19 +27,18 @@ import {
   applyRefEdits,
   type BrokenRef,
   type RefEdit,
+  type RefScope,
   scanReferences,
   type ScanResult,
 } from '../core/refs.js';
 
-export interface RefsCheckOptions {
+export interface RefsCheckOptions extends RefScope {
   path?: string;
-  /** Report bare filenames that look like references even with nothing to suggest. */
-  strict?: boolean;
   json?: boolean;
   cwd: string;
 }
 
-export interface RefsFixOptions {
+export interface RefsFixOptions extends RefScope {
   path?: string;
   /**
    * Write the fix file and stop, instead of opening an editor. Takes an
@@ -48,7 +47,6 @@ export interface RefsFixOptions {
   write?: boolean | string;
   /** Apply an already-edited fix file rather than producing a new one. */
   file?: string;
-  strict?: boolean;
   dryRun?: boolean;
   /** Test seam: stands in for the user's editor. */
   edit?: (file: string) => Promise<void>;
@@ -65,13 +63,49 @@ export type FixFile = Record<string, FixEntry>;
 
 const DEFAULT_FIX_FILE = 'hcm-refs.json';
 
+/**
+ * The scan scope, read off the flags.
+ *
+ * `check` and `fix` share it because `fix` re-scans before applying: a fix file
+ * produced under one scope and applied under another would not find the
+ * references it was written for.
+ */
+function scopeOf(options: RefScope): RefScope {
+  return {
+    links: options.links ?? false,
+    allPaths: options.allPaths ?? false,
+    strict: options.strict ?? false,
+  };
+}
+
+/**
+ * The scope as flags again, so a command we print can be pasted and reproduce
+ * the same scan. `fix` re-scans, so a hint that dropped them would repair a
+ * different set of references than the one just reported.
+ */
+function scopeFlags(scope: RefScope): string {
+  const flags = [
+    scope.links === true ? '--links' : '',
+    scope.strict === true ? '--strict' : scope.allPaths === true ? '--all-paths' : '',
+  ].filter(Boolean);
+  return flags.length > 0 ? ` ${flags.join(' ')}` : '';
+}
+
+/** The scope in a few words, so the report says what it did and did not read. */
+function describeScope(scope: RefScope): string {
+  if (scope.links === true) return 'links and wikilinks only';
+  if (scope.strict === true) return 'every path, including bare filenames with no match';
+  if (scope.allPaths === true) return 'every path, including implicit ones';
+  return 'links, wikilinks and explicitly relative paths';
+}
+
 // ---------------------------------------------------------------------------
 // check
 // ---------------------------------------------------------------------------
 
 export async function refsCheckCommand(options: RefsCheckOptions): Promise<boolean> {
   const root = await resolveRoot(options.path, options.cwd);
-  const result = await scanReferences(root, { strict: options.strict ?? false });
+  const result = await scanReferences(root, scopeOf(options));
 
   if (options.json) {
     log.plain(JSON.stringify(toReport(result), null, 2));
@@ -85,6 +119,7 @@ export async function refsCheckCommand(options: RefsCheckOptions): Promise<boole
           `${result.bundles.length} bundle(s)`,
       ),
   );
+  log.plain(color.dim(`  scope: ${describeScope(result.scope)}`));
 
   if (result.broken.length === 0) {
     log.success('  No broken references.');
@@ -110,13 +145,19 @@ export async function refsCheckCommand(options: RefsCheckOptions): Promise<boole
   log.warn(
     `${result.broken.length} broken reference(s) in ${groupByFile(result.broken).size} file(s)`,
   );
-  log.info(color.dim(`Run "hcm refs fix --path ${quote(options.path ?? '.')}" to repair them.`));
+  log.info(
+    color.dim(
+      `Run "hcm refs fix --path ${quote(options.path ?? '.')}${scopeFlags(result.scope)}" ` +
+        'to repair them.',
+    ),
+  );
   return false;
 }
 
 function toReport(result: ScanResult): unknown {
   return {
     root: result.root,
+    scope: result.scope,
     scanned: result.scanned.length,
     references: result.refs.length,
     broken: result.broken.map((ref) => ({
@@ -143,7 +184,7 @@ export async function refsFixCommand(options: RefsFixOptions): Promise<boolean> 
   if (options.file) return applyFixFile(options.file, options);
 
   const root = await resolveRoot(options.path, options.cwd);
-  const result = await scanReferences(root, { strict: options.strict ?? false });
+  const result = await scanReferences(root, scopeOf(options));
 
   if (result.broken.length === 0) {
     log.success('No broken references — nothing to fix.');
@@ -168,9 +209,8 @@ export async function refsFixCommand(options: RefsFixOptions): Promise<boolean> 
     log.info(
       color.dim(
         'Leave exactly one entry in each "new" list, then apply it with:\n' +
-          `  hcm refs fix --path ${quote(options.path ?? '.')} --file ${quote(
-            toPosix(path.relative(options.cwd, destination)) || destination,
-          )}`,
+          `  hcm refs fix --path ${quote(options.path ?? '.')}${scopeFlags(result.scope)} ` +
+            `--file ${quote(toPosix(path.relative(options.cwd, destination)) || destination)}`,
       ),
     );
     return true;
@@ -239,7 +279,7 @@ async function applyFixFile(file: string, options: RefsFixOptions): Promise<bool
 
   // Re-scan so the offsets are current: whatever the user did to the JSON, the
   // bundle itself may have been edited in the same sitting.
-  const result = await scanReferences(root, { strict: options.strict ?? false });
+  const result = await scanReferences(root, scopeOf(options));
   const located = new Map<string, BrokenRef[]>();
   for (const ref of result.broken) {
     const list = located.get(ref.fileRelative) ?? [];

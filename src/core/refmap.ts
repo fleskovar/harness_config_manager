@@ -41,7 +41,7 @@
  * better than a plausible one that is wrong.
  */
 
-import { extractRefs, looksLikePath } from './refs.js';
+import { extractRefs, INSTALL_POLICY, looksLikePath } from './refs.js';
 import type { BundleResource, LoadedBundle, PlanAction } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -246,7 +246,7 @@ function remapText(
   installedFrom: string,
   map: RefMap,
 ): RemapResult & { text: string } {
-  const found = extractRefs(from, text);
+  const found = extractRefs(from, text, INSTALL_POLICY);
   const rewrites: { from: string; to: string }[] = [];
   const dropped: { ref: string; reason: string }[] = [];
   const edits: { start: number; end: number; value: string }[] = [];

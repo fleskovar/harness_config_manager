@@ -872,10 +872,16 @@ whole collection — resolves each reference both ways, and reports what resolve
 neither way, with the files it probably meant:
 
 ```
+ts-review-kit/README.md · 14 file(s) · 9 reference(s) · 1 bundle(s)
+  scope: links, wikilinks and explicitly relative paths
+
 ts-review-kit/README.md
-  ✖ line 11  context/conventions.md (code)
+  ✖ line 11  context/conventions.md (link)
       → context/10-conventions.md
 ```
+
+The `scope` line is the important one, and [What counts as a
+reference](#what-counts-as-a-reference) is what it means.
 
 `fix` puts the same thing in a JSON file, one entry per broken reference, each
 with the candidates ranked best first:
@@ -913,11 +919,31 @@ another bundle is marked, and never outranks one from the bundle doing the
 referring: it may not be installed alongside it, and it cannot be remapped if it
 is not.
 
-### What it will not report
+### What counts as a reference
 
-A bundle's prose is full of filenames it is not referring to. Reporting
-`package.json` as a broken reference in a skill that merely says to read one
-would make the report worthless, so:
+A bundle's prose is full of filenames it is not referring to:
+
+```markdown
+A file will be created named `report.txt`.
+Identify the manifest (`package.json`) and read `tsconfig.json`.
+The run log lands in `logs/scaffold.txt`.
+```
+
+Every one of those sentences is complete and true, and not one of them points at
+a file the bundle ships. A checker that flags them is wrong about the bundle and
+trains you to skim its output — so a reference has to be **written as one**, in
+one of two ways:
+
+| | |
+| --- | --- |
+| **Declared** | the syntax says its target is a path: `[text](path)`, `![img](path)`, a `[id]:` definition, a `[[wikilink]]`, an `@path` mention |
+| **Relative** | written with an explicit `./` or `../`, anywhere — inline code, a config value, a link target |
+
+Everything else is left alone. `` `checklist.md` `` is a name; `` `./checklist.md` ``
+is a reference, and the `./` is you saying so. When you mean a file the bundle
+ships, write the prefix.
+
+Beyond that, and at every scope:
 
 - **Fenced code blocks are skipped** — they are examples and shell sessions.
 - **URLs, anchors, absolute paths, `~/…` and `${VAR}` paths** are somebody
@@ -927,13 +953,35 @@ would make the report worthless, so:
   Bundles ship no hidden directories, so these are documentation, not references.
 - **Well-known project filenames** (`package.json`, `tsconfig.json`, `go.mod`,
   lockfiles…) mentioned without a path.
-- **A bare filename with nothing similar in the tree** — `checklist.md` with no
-  candidate anywhere is prose, and there would be no fix to offer if it were
-  not. `--strict` reports these too.
 
-Anything written as a reference — a link, an image, a link definition — or
-containing a `/` is always reported. Nobody writes `skills/audit/checklist.md`
-as a turn of phrase.
+#### Wikilinks
+
+`[[release-checklist]]` resolves the way wiki tools resolve one — by **name**,
+against any file in the same bundle, wherever it sits. The `|alias` and
+`#heading` are not part of the name, and a missing extension is guessed
+(`.md`, `.markdown`, `.mdx`). A fix for a broken wikilink is offered as a
+wikilink, not as a path.
+
+Wikilinks are checked but **not** rewritten at install time: a name survives
+being moved, and turning one into a relative path would break it.
+
+#### Moving the line
+
+```bash
+hcm refs check --path ./bundles --links       # links and wikilinks only
+hcm refs check --path ./bundles --all-paths   # ...plus every implicit path
+hcm refs check --path ./bundles --strict      # ...plus bare names matching nothing
+```
+
+`--links` is the narrow pass, for when you care about a document's links and
+nothing else — it reads no config values at all. `--all-paths` is the wide one,
+and it is how this used to behave by default: bare filenames and implicit paths
+come back, with a bare name reported only when something similar exists to offer
+as a fix. `--strict` implies `--all-paths` and drops that last condition.
+
+`fix` takes the same three flags, and needs the ones `check` was run with — it
+re-scans before applying, and a narrower scope would not find the references the
+fix file was written for.
 
 ## How rollback stays exact
 
@@ -1064,8 +1112,8 @@ hcm install my-kit --on-conflict prompt     # ask even where hcm would not have
 | `hcm context append [bundle...]` | Add back the sections that have gone missing. `-t`, `-s`, `--dry-run`, `--force` |
 | `hcm context override [bundle...]` | Clear the file and rewrite it from the cached sections. `-t`, `-s`, `--dry-run`, `--force` |
 | `hcm context remove [bundle...]` | Take the sections out, keeping the cached copies. `-t`, `-s`, `--dry-run` |
-| `hcm refs check` | Report file references that point at nothing. `-p/--path`, `--strict`, `--json` |
-| `hcm refs fix` | Repair them by picking from a ranked list. `-p/--path`, `--write [file]`, `--file <path>`, `--strict`, `--dry-run` |
+| `hcm refs check` | Report file references that point at nothing. `-p/--path`, `--links`, `--all-paths`, `--strict`, `--json` |
+| `hcm refs fix` | Repair them by picking from a ranked list. `-p/--path`, `--write [file]`, `--file <path>`, `--links`, `--all-paths`, `--strict`, `--dry-run` |
 | `hcm validate [dir]` | Check a bundle for common mistakes |
 | `hcm init [dir]` | Scaffold a new bundle |
 | `hcm targets` | Supported harnesses, their paths, which are set up here, and the files they share |

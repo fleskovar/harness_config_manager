@@ -85,7 +85,7 @@ to the project between commands:
 | `{ "uninstall": "kit" }` | `hcm uninstall`. Flags: `targets`, `scope`, `force`, `cascade`, `keepOrphans`, `ignoreDependents`, `dryRun` |
 | `{ "context": "append" \| "override" \| "remove" }` | `hcm context …`. Flags: `bundles`, `targets`, `scope`, `force`, `dryRun` |
 | `{ "validate": "kit" }` | `hcm validate` → `outputs/report.json` |
-| `{ "refs": "kit" }` | `hcm refs check` → `outputs/report.json` |
+| `{ "refs": "kit" }` | `hcm refs check` → `outputs/report.json`. Flags: `links`, `allPaths`, `strict`, and `as` to name the output document |
 | `{ "register": "kit", "dev": true }` | `hcm registry add` |
 | `{ "replaceBundle": "kit", "with": "kit-v2" }` | an upstream release: same name, new files |
 | `{ "writeFile": "CLAUDE.md", "from": "rewritten.md" }` | an agent rewrites a file (`from` names a file in `inputs/`) |
@@ -106,6 +106,7 @@ timestamps and absolute paths normalised out.
 | `tree/**` | always — every file in the project afterwards |
 | `state.json` | `recordState: true` — the installation ledger, normalised |
 | `report.json` | a `validate` or `refs` step ran |
+| `report-*.json` | a `refs` step named its output with `as`, so one case can show two scopes side by side |
 | `error.txt` | a step was marked `fails` |
 
 `tree/` is **exhaustive**: a file absent from it must be absent from the

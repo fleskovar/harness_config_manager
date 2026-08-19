@@ -1,0 +1,6 @@
+name: scaffold-kit
+version: 1.0.0
+description: "A skill whose prose names a dozen files and references exactly two."
+resources:
+  - kind: skill
+    path: skills/scaffold

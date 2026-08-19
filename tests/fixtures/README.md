@@ -58,12 +58,35 @@ npx tsx src/cli.ts refs check --path tests/fixtures/bundles/broken-refs-kit
 Before you run it: open the bundle and find the references that point at
 nothing. There are four, and each has one obvious answer.
 
-| Where | It says | It meant | Why |
-| --- | --- | --- | --- |
-| `commands/review-pr.md`, line 8 | `context/conventions.md` | `context/10-conventions.md` | `context/` holds `10-conventions.md` and `20-pull-requests.md`; only one is about conventions |
-| `mcp/formatter.json`, line 3 | `assets/format.sh` | `assets/format-code.sh` | `assets/` holds exactly one file |
-| `skills/release-audit/SKILL.md`, line 7 | `checklist.md` | `skills/release-audit/release-checklist.md` | The skill's own directory holds `release-checklist.md` |
-| `subagents/code-reviewer.md`, line 5 | `rules/typescrpt.md` | `rules/typescript.md` | A typo; `rules/` holds one file |
+| Where | It says | Written as | It meant | Why |
+| --- | --- | --- | --- | --- |
+| `commands/review-pr.md`, line 8 | `context/conventions.md` | a link | `context/10-conventions.md` | `context/` holds `10-conventions.md` and `20-pull-requests.md`; only one is about conventions |
+| `mcp/formatter.json`, line 3 | `../assets/format.sh` | a config value, explicitly relative | `../assets/format-code.sh` | `assets/` holds exactly one file |
+| `skills/release-audit/SKILL.md`, line 7 | `./checklist.md` | inline code, explicitly relative | `./release-checklist.md` | The skill's own directory holds `release-checklist.md` |
+| `subagents/code-reviewer.md`, line 11 | `rules/typescrpt.md` | a link | `rules/typescript.md` | A typo; `rules/` holds one file |
 
 The same table, as a baseline you can diff against, is
 `tests/cases/refs-finds-four-broken/outputs/report.json`.
+
+### The paths that are *not* references
+
+Every one of the four above is written as a reference: two are markdown links,
+and two carry an explicit `./` or `../`. That is the whole rule, and the bundle
+is stocked with near-misses to prove it holds:
+
+| Where | It says | Why it is silent |
+| --- | --- | --- |
+| `skills/release-audit/SKILL.md` | `` `audit-summary.md` `` | A sentence about a file the skill *creates*. Nothing points at it |
+| `skills/release-audit/SKILL.md` | `` `reports/dependency-tree.txt` `` | The same, with a directory in front. A separator is not intent |
+| `skills/release-audit/SKILL.md` | `` `package.json` ``, `` `tsconfig.json` `` | Files in whatever project the skill runs against |
+| `skills/release-audit/SKILL.md` | `docs/release-notes.md` | Inside a fenced code block |
+| `commands/review-pr.md` | `https://example.com/style/guide.md` | Somebody else's to resolve |
+| `README.md` | the file names in its table | Prose about the bundle, in inline code |
+
+Run it again with `--all-paths` and `reports/dependency-tree.txt` joins the
+report; with `--strict`, so does `audit-summary.md`. Neither is a broken
+reference, which is the argument for the default scope in one line.
+
+One reference resolves in a way none of the others do: `[[release-checklist]]`
+in the SKILL.md is a wikilink, and wikilinks resolve by *name* rather than by
+path — `release-checklist.md` in the same bundle, wherever it sits.

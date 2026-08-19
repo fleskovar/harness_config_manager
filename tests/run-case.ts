@@ -131,8 +131,15 @@ export type CaseStep =
     }
   /** `hcm validate <bundle>` -> outputs/report.json */
   | { validate: string }
-  /** `hcm refs check <bundle>` -> outputs/report.json */
-  | { refs: string }
+  /**
+   * `hcm refs check <bundle>` -> outputs/report.json.
+   *
+   * `links`, `allPaths` and `strict` are the scan-scope flags. `as` names the
+   * output document, so one case can run the same bundle under two scopes and
+   * put the two reports side by side -- which is the only way to *show* what a
+   * scope leaves out.
+   */
+  | { refs: string; links?: boolean; allPaths?: boolean; strict?: boolean; as?: string }
   /** Register a bundle so a later step can name it. `--dev` reads it in place. */
   | { register: string; dev?: boolean }
   /** An upstream release: replace one bundle's files with another's. */
@@ -310,13 +317,19 @@ async function runStep(step: CaseStep, ctx: RunContext): Promise<void> {
   }
 
   if ('refs' in step) {
-    const result = await scanReferences(at(step.refs));
-    ctx.documents['report.json'] = {
+    const result = await scanReferences(at(step.refs), {
+      ...(step.links ? { links: true } : {}),
+      ...(step.allPaths ? { allPaths: true } : {}),
+      ...(step.strict ? { strict: true } : {}),
+    });
+    ctx.documents[step.as ?? 'report.json'] = {
+      scope: result.scope,
       // The suggestion's `ref` -- what the reference should have said -- and
       // not its `target`, which is an absolute path on this machine.
       broken: result.broken.map((ref) => ({
         file: ref.fileRelative,
         ref: ref.ref,
+        syntax: ref.syntax,
         suggestions: ref.suggestions.map((suggestion) => suggestion.ref),
       })),
     };

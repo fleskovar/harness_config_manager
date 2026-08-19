@@ -49,8 +49,11 @@ describe('the healthy fixtures', () => {
     expect(await validateCommand(fixturePath(relative), { cwd: workspace })).toBe(true);
   });
 
+  // `allPaths`, not the default scope: these are hand-written fixtures, and the
+  // point of the check is that *every* path-shaped thing in them resolves. The
+  // default scope would pass them without reading most of it.
   it.each(HEALTHY)('%s has no broken references', async (relative) => {
-    const result = await scanReferences(fixturePath(relative));
+    const result = await scanReferences(fixturePath(relative), { allPaths: true });
     expect(result.broken.map((ref) => `${ref.fileRelative}: ${ref.ref}`)).toEqual([]);
   });
 });

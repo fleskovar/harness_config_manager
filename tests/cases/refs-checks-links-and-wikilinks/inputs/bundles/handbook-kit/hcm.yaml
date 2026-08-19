@@ -1,0 +1,6 @@
+name: handbook-kit
+version: 1.0.0
+description: "A handbook written in wikilinks, with one of each way a link can go wrong."
+resources:
+  - kind: skill
+    path: skills/onboard

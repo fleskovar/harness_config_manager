@@ -8,6 +8,10 @@
  * between you and the app shows up as a failing assertion rather than as a
  * report nobody checked.
  *
+ * The bundle is also stocked with filenames that are *not* references --
+ * `audit-summary.md`, `reports/dependency-tree.txt`, `package.json` -- and the
+ * count of four is as much an assertion about those as about the four.
+ *
  * `tests/fixtures/README.md` has the same table in prose, with the reasoning.
  */
 
@@ -38,15 +42,17 @@ afterEach(async () => {
  * The whole answer key. Each row: the file the reference is written in, the
  * line it is on, what it says, and the file it should have said.
  *
- *   commands/review-pr.md          `context/conventions.md`
+ *   commands/review-pr.md          [the team's conventions](context/conventions.md)
  *       context/ holds 10-conventions.md and 20-pull-requests.md. Only one of
- *       them is about conventions.
- *   mcp/formatter.json             "assets/format.sh"
- *       assets/ holds one file, and it is not called format.sh.
- *   skills/release-audit/SKILL.md  `checklist.md`
- *       The skill's own directory holds release-checklist.md. Suggestions are
- *       written from the bundle root, which is why the answer has the whole
- *       path in it -- both readings resolve, so either form would work.
+ *       them is about conventions. A link, so its target is a path whether or
+ *       not it was written with a `./`.
+ *   mcp/formatter.json             "../assets/format.sh"
+ *       assets/ holds one file, and it is not called format.sh. A config value,
+ *       in scope because of the `../`.
+ *   skills/release-audit/SKILL.md  `./checklist.md`
+ *       The skill's own directory holds release-checklist.md. The fix keeps the
+ *       `./` the author wrote: that prefix is what made it a reference, and a
+ *       repair that dropped it would drop the line out of every later check.
  *   subagents/code-reviewer.md     [the TypeScript rules](rules/typescrpt.md)
  *       A typo, one letter out from the file that is there.
  */
@@ -60,14 +66,14 @@ const EXPECTED = [
   {
     file: 'mcp/formatter.json',
     line: 3,
-    broken: 'assets/format.sh',
-    fix: 'assets/format-code.sh',
+    broken: '../assets/format.sh',
+    fix: '../assets/format-code.sh',
   },
   {
     file: 'skills/release-audit/SKILL.md',
     line: 7,
-    broken: 'checklist.md',
-    fix: 'skills/release-audit/release-checklist.md',
+    broken: './checklist.md',
+    fix: './release-checklist.md',
   },
   {
     file: 'subagents/code-reviewer.md',
@@ -94,9 +100,31 @@ describe('hcm refs check, on a bundle with four broken references', () => {
     const result = await scanReferences(kit);
     const resolved = result.refs.filter((ref) => ref.target !== undefined).map((ref) => ref.ref);
 
-    // Written from the bundle root in a command, and from the README.
+    // Both links in the command, written from the bundle root.
     expect(resolved).toContain('skills/release-audit/release-checklist.md');
     expect(resolved).toContain('rules/typescript.md');
+    // A wikilink, resolved by name rather than by path.
+    expect(resolved).toContain('release-checklist');
+  });
+
+  it('says nothing about the filenames the bundle only talks about', async () => {
+    const reported = (await scanReferences(kit)).broken.map((ref) => ref.ref);
+
+    // Sentences that name a file the skill will create, or that some other
+    // project owns. A separator does not make one of them a reference either.
+    expect(reported).not.toContain('audit-summary.md');
+    expect(reported).not.toContain('reports/dependency-tree.txt');
+    expect(reported).not.toContain('package.json');
+    expect(reported).toHaveLength(EXPECTED.length);
+  });
+
+  it('--all-paths picks up the prose the default scope steps over', async () => {
+    const reported = (await scanReferences(kit, { allPaths: true })).broken.map((ref) => ref.ref);
+
+    // Which is the argument for the default: this one is a true sentence about
+    // a file being written, not a reference that points at nothing.
+    expect(reported).toContain('reports/dependency-tree.txt');
+    expect(reported.length).toBeGreaterThan(EXPECTED.length);
   });
 
   it('fails on this bundle, and passes on the healthy one next to it', async () => {
@@ -135,18 +163,18 @@ describe('hcm refs fix', () => {
 
     // And the repaired text says what a human would have typed.
     const command = await readText(kit, 'commands/review-pr.md');
-    expect(command).toContain('`context/10-conventions.md`');
+    expect(command).toContain('](context/10-conventions.md)');
     expect(command).not.toContain('context/conventions.md');
 
     expect(await readText(kit, 'subagents/code-reviewer.md')).toContain(
       '[the TypeScript rules](rules/typescript.md)',
     );
     expect(await readText(kit, 'skills/release-audit/SKILL.md')).toContain(
-      '`skills/release-audit/release-checklist.md`',
+      '`./release-checklist.md`',
     );
     expect(JSON.parse(await readText(kit, 'mcp/formatter.json'))).toEqual({
       command: 'bash',
-      args: ['assets/format-code.sh', '--serve'],
+      args: ['../assets/format-code.sh', '--serve'],
     });
   });
 
@@ -156,8 +184,8 @@ describe('hcm refs fix', () => {
     const ok = await refsFixCommand({ path: kit, cwd: workspace, edit: async () => {} });
 
     expect(ok).toBe(false);
-    expect((await scanReferences(kit)).broken.map((ref) => ref.ref)).toEqual(['checklist.md']);
-    expect(await readText(kit, 'skills/release-audit/SKILL.md')).toContain('`checklist.md`');
+    expect((await scanReferences(kit)).broken.map((ref) => ref.ref)).toEqual(['./checklist.md']);
+    expect(await readText(kit, 'skills/release-audit/SKILL.md')).toContain('`./checklist.md`');
   });
 
   it('--write hands over the file and changes nothing yet', async () => {
@@ -165,7 +193,7 @@ describe('hcm refs fix', () => {
 
     const written = JSON.parse(await readText(workspace, 'fixes.json')) as FixFile;
     expect(Object.keys(written)).toEqual(EXPECTED.map((expected) => expected.file));
-    expect(await readText(kit, 'commands/review-pr.md')).toContain('`context/conventions.md`');
+    expect(await readText(kit, 'commands/review-pr.md')).toContain('](context/conventions.md)');
 
     // ...and applying the edited file afterwards is the other half of the trip.
     await fs.writeFile(

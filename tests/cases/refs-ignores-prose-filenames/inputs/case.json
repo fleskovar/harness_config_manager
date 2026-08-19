@@ -1,0 +1,8 @@
+{
+  "describes": "refs check stays silent about prose filenames, and --all-paths shows what it stepped over",
+  "steps": [
+    { "refs": "scaffold-kit" },
+    { "refs": "scaffold-kit", "allPaths": true, "as": "report-all-paths.json" },
+    { "refs": "scaffold-kit", "strict": true, "as": "report-strict.json" }
+  ]
+}

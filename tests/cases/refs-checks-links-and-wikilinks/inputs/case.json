@@ -1,0 +1,7 @@
+{
+  "describes": "refs check resolves wikilinks by name, and --links narrows the scan to links and wikilinks",
+  "steps": [
+    { "refs": "handbook-kit" },
+    { "refs": "handbook-kit", "links": true, "as": "report-links.json" }
+  ]
+}

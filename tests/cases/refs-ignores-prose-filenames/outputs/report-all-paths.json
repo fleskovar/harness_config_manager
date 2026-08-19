@@ -1,0 +1,29 @@
+{
+  "scope": {
+    "links": false,
+    "allPaths": true,
+    "strict": false
+  },
+  "broken": [
+    {
+      "file": "skills/scaffold/SKILL.md",
+      "ref": "build/manifest.json",
+      "syntax": "code",
+      "suggestions": []
+    },
+    {
+      "file": "skills/scaffold/SKILL.md",
+      "ref": "logs/scaffold.txt",
+      "syntax": "code",
+      "suggestions": []
+    },
+    {
+      "file": "skills/scaffold/SKILL.md",
+      "ref": "context/naming.md",
+      "syntax": "link",
+      "suggestions": [
+        "context/naming-conventions.md"
+      ]
+    }
+  ]
+}

@@ -3,27 +3,48 @@
  * them point at nothing.
  *
  * A bundle is prose plus config, and both are full of paths: a SKILL.md that
- * says to work through `checklist.md`, a command that links to
+ * says to work through `./checklist.md`, a command that links to
  * [the conventions](context/10-conventions.md), an MCP server whose args name a
  * script under `assets/`. Rename the file and every one of those becomes a lie
  * the agent will follow.
  *
- * Two problems make this harder than grepping for slashes:
+ * The hard part is not finding paths. It is not finding the things that merely
+ * look like paths. Prose about files is still prose:
  *
- *   1. Prose mentions filenames it is not referring to. "Run `npm audit`, then
- *      check `package.json`" names a file that is not in the bundle and never
- *      will be. Reporting it as broken trains people to ignore the report.
- *   2. What a reference is relative to is not stated anywhere. `checklist.md`
- *      next to a SKILL.md means the sibling; `skills/audit/checklist.md` in a
- *      command means the same file, from the bundle root.
+ *     A file will be created named `output.txt`.
+ *     Identify the manifest (`package.json`) and read `tsconfig.json`.
  *
- * So references carry a confidence, and resolution tries both roots:
+ * Not one of those is a reference to a file the bundle ships, and a checker
+ * that says otherwise is a checker nobody runs. Filename-shaped text is far too
+ * common in writing about software to be treated as a claim about the tree.
  *
- *   strong  written as a reference -- [text](path), ![img](path), a link
- *           definition, or a path with a separator in it. Always reported.
- *   weak    a bare filename in inline code or frontmatter. Reported only when
- *           something similar exists in the tree, which is also exactly when we
- *           have a fix to offer. `--strict` reports these regardless.
+ * So a reference has to be *written as one*, in one of two ways:
+ *
+ *   declared    the syntax says outright that its target is a path --
+ *               [text](path), ![img](path), a [id]: definition, a [[wikilink]],
+ *               or an @path mention. Nobody writes a markdown link to a turn of
+ *               phrase.
+ *   relative    written with an explicit `./` or `../`. That prefix is a
+ *               deliberate act: `./output.txt` says "the file beside this one"
+ *               where `output.txt` says only "a file called that".
+ *
+ * Everything else -- a bare filename or an implicit path in inline code or a
+ * config value -- is left alone unless `--all-paths` asks for it, which is the
+ * older, noisier behaviour kept for the bundles that were written against it.
+ *
+ * What a reference is relative to is still not stated anywhere, so resolution
+ * tries both roots: `./checklist.md` next to a SKILL.md means the sibling;
+ * `skills/audit/checklist.md` in a command means the same file, from the bundle
+ * root.
+ *
+ * Under `--all-paths`, references also carry a confidence, and it decides how
+ * loud the report is:
+ *
+ *   strong  declared, explicitly relative, or holding a separator. Always
+ *           reported.
+ *   weak    a bare filename in inline code or a config value. Reported only
+ *           when something similar exists in the tree, which is also exactly
+ *           when we have a fix to offer. `--strict` reports these regardless.
  *
  * @see refmap.ts for what happens to these references at install time.
  */
@@ -42,9 +63,45 @@ export type RefSyntax =
   | 'link' // [text](target)
   | 'image' // ![alt](target)
   | 'definition' // [id]: target
+  | 'wikilink' // [[target]], [[target|alias]]
   | 'code' // `target`
   | 'mention' // @target
   | 'config'; // a string value in JSON/YAML/TOML
+
+export const REF_SYNTAXES: readonly RefSyntax[] = [
+  'link',
+  'image',
+  'definition',
+  'wikilink',
+  'code',
+  'mention',
+  'config',
+];
+
+/**
+ * The syntaxes whose target is a path by construction.
+ *
+ * `[the rules](rules/typescript.md)` cannot be a turn of phrase the way
+ * `` `rules.md` `` can: markdown has already said the thing in the parentheses
+ * is somewhere to go. The same holds for a wikilink and for the `@file`
+ * convention several harnesses read as "open this". These are checked as
+ * written, without needing a `./` in front of them.
+ */
+export const DECLARED_SYNTAXES: ReadonlySet<RefSyntax> = new Set<RefSyntax>([
+  'link',
+  'image',
+  'definition',
+  'wikilink',
+  'mention',
+]);
+
+/** What `--links` narrows to: the syntaxes that are a link of some kind. */
+export const LINK_SYNTAXES: ReadonlySet<RefSyntax> = new Set<RefSyntax>([
+  'link',
+  'image',
+  'definition',
+  'wikilink',
+]);
 
 export interface FoundRef {
   /** Absolute path of the file the reference is written in. */
@@ -67,8 +124,11 @@ export interface FoundRef {
 export interface ResolvedRef extends FoundRef {
   /** Absolute path the reference resolves to, when it resolves at all. */
   target?: string;
-  /** How it resolved -- against the containing file, or against the bundle root. */
-  via?: 'file' | 'bundle';
+  /**
+   * How it resolved -- against the containing file, against the bundle root,
+   * or, for a wikilink, by the name of a file somewhere in the same bundle.
+   */
+  via?: 'file' | 'bundle' | 'name';
 }
 
 export interface RefSuggestion {
@@ -89,6 +149,8 @@ export interface BrokenRef extends ResolvedRef {
 export interface ScanResult {
   /** Absolute path that `fileRelative` values are relative to. */
   root: string;
+  /** The rules this scan ran under, so a report can say what it looked at. */
+  scope: RefScope;
   /** Every file that was read. */
   scanned: string[];
   /** Bundle roots found under the scan root. */
@@ -98,12 +160,72 @@ export interface ScanResult {
   broken: BrokenRef[];
 }
 
-export interface ScanOptions {
-  /** Report weak references even when nothing similar exists to suggest. */
+/**
+ * Which references a scan is about.
+ *
+ * The default -- every flag off -- is the narrow one: declared references, and
+ * paths written with an explicit `./` or `../`. The flags widen or narrow it
+ * from there, and they are the same three the CLI exposes.
+ */
+export interface RefScope {
+  /** Only links, images, link definitions and wikilinks. */
+  links?: boolean;
+  /**
+   * Also treat implicit paths and bare filenames in inline code and config
+   * values as references -- noisier, and how this worked before.
+   */
+  allPaths?: boolean;
+  /**
+   * Implies `allPaths`, and additionally reports a bare filename even when
+   * there is nothing similar in the tree to offer as a fix.
+   */
   strict?: boolean;
+}
+
+export interface ScanOptions extends RefScope {
   /** How many replacements to offer per broken reference. */
   suggestions?: number;
 }
+
+/** The scope, resolved into the two questions extraction actually asks. */
+export interface RefPolicy {
+  /** Syntaxes worth looking at. */
+  syntaxes: ReadonlySet<RefSyntax>;
+  /**
+   * Whether a path in a syntax that merely *might* hold one -- inline code, a
+   * config value -- has to be written `./like/this` before it counts.
+   */
+  requireExplicitRelative: boolean;
+}
+
+/**
+ * The scope a scan was asked for, as the rules extraction follows.
+ *
+ * `--strict` is a louder `--all-paths` rather than a scope of its own: it
+ * changes which of the found references get *reported*, not which get found.
+ */
+export function refPolicy(scope: RefScope = {}): RefPolicy {
+  const permissive = scope.allPaths === true || scope.strict === true;
+  return {
+    syntaxes: scope.links === true ? LINK_SYNTAXES : new Set(REF_SYNTAXES),
+    requireExplicitRelative: !permissive,
+  };
+}
+
+/**
+ * What the installer reads, which is not what the checker reads.
+ *
+ * Remapping rewrites references it can prove point at a bundle file (see
+ * refmap.ts), so a false positive costs nothing there -- an implicit
+ * `skills/audit/checklist.md` that resolves is repointed, and prose that only
+ * looks like a path resolves to nothing and is left alone. Wikilinks are the
+ * exception in the other direction: they are resolved by *name* rather than by
+ * path, so rewriting one into a relative path would break it.
+ */
+export const INSTALL_POLICY: RefPolicy = {
+  syntaxes: new Set(REF_SYNTAXES.filter((syntax) => syntax !== 'wikilink')),
+  requireExplicitRelative: false,
+};
 
 // ---------------------------------------------------------------------------
 // What we read, and what we refuse to treat as a path
@@ -181,6 +303,7 @@ async function scanFiles(
 ): Promise<ScanResult> {
   const bundles = await findBundleRoots(root);
   const index = await buildFileIndex(root);
+  const policy = refPolicy(options);
 
   const refs: ResolvedRef[] = [];
 
@@ -189,14 +312,14 @@ async function scanFiles(
     if (text === undefined) continue;
 
     const bundleRoot = bundleRootFor(file, bundles);
-    const found = extractRefs(file, text);
+    const found = extractRefs(file, text, policy);
 
     for (const ref of found) {
       refs.push({
         ...ref,
         fileRelative: toPosix(path.relative(root, file)),
         ...(bundleRoot ? { bundleRoot } : {}),
-        ...(await resolveRef(ref.ref, file, bundleRoot)),
+        ...(await resolveRef(ref.ref, file, bundleRoot, { syntax: ref.syntax, index })),
       });
     }
   }
@@ -213,7 +336,21 @@ async function scanFiles(
     broken.push({ ...ref, suggestions });
   }
 
-  return { root, scanned: files, bundles, refs, broken };
+  return {
+    root,
+    // The scope as it was *applied*, not as it was typed: `--strict` implies
+    // `--all-paths`, and a report that said otherwise would be describing a
+    // scan that did not happen.
+    scope: {
+      links: options.links === true,
+      allPaths: options.allPaths === true || options.strict === true,
+      strict: options.strict === true,
+    },
+    scanned: files,
+    bundles,
+    refs,
+    broken,
+  };
 }
 
 export function isScannable(file: string): boolean {
@@ -282,13 +419,26 @@ function isInside(file: string, dir: string): boolean {
 // Extraction
 // ---------------------------------------------------------------------------
 
-/** Every reference candidate in one file, with its offsets. */
-export function extractRefs(file: string, text: string): Omit<FoundRef, 'fileRelative'>[] {
+/**
+ * Every reference candidate in one file, with its offsets.
+ *
+ * `policy` decides what counts as one. It defaults to `INSTALL_POLICY` -- the
+ * permissive reading the installer needs -- so that a caller who has not
+ * thought about scope gets the same answer this always gave. `scanReferences`
+ * passes the checker's narrower policy explicitly.
+ */
+export function extractRefs(
+  file: string,
+  text: string,
+  policy: RefPolicy = INSTALL_POLICY,
+): Omit<FoundRef, 'fileRelative'>[] {
   const extension = path.extname(file).toLowerCase();
   const found = MARKDOWN.has(extension) ? extractFromMarkdown(text) : extractFromConfig(text);
 
   return found
+    .filter((candidate) => policy.syntaxes.has(candidate.syntax))
     .filter((candidate) => looksLikePath(candidate.ref, candidate.syntax))
+    .filter((candidate) => isInScope(candidate.ref, candidate.syntax, policy))
     .map((candidate) => ({
       file,
       ref: candidate.ref,
@@ -300,12 +450,35 @@ export function extractRefs(file: string, text: string): Omit<FoundRef, 'fileRel
     }));
 }
 
+/**
+ * The rule that keeps prose out of the report.
+ *
+ * A declared reference is in scope whatever it says -- the syntax has already
+ * vouched for it. Anything else has to have been written as a path on purpose,
+ * and `./` or `../` is the only mark of that a bundle author can make. A bare
+ * `output.txt` in a sentence about creating a file is indistinguishable from a
+ * bare `output.txt` meant as a reference, so neither is treated as one.
+ */
+export function isInScope(ref: string, syntax: RefSyntax, policy: RefPolicy): boolean {
+  if (!policy.requireExplicitRelative) return true;
+  if (DECLARED_SYNTAXES.has(syntax)) return true;
+  return isExplicitlyRelative(ref);
+}
+
+/** `./here.md` and `../up/there.md`, and nothing else. */
+export function isExplicitlyRelative(ref: string): boolean {
+  return /^\.\.?\//.test(ref.trim());
+}
+
 interface Candidate {
   ref: string;
   syntax: RefSyntax;
   start: number;
   end: number;
 }
+
+/** `[start, end)` of every single-backtick inline code span. */
+const INLINE_CODE = /(?<!`)`([^`\n]+)`(?!`)/g;
 
 /**
  * Markdown, minus the parts of it that are not prose.
@@ -314,10 +487,26 @@ interface Candidate {
  * and the paths in them belong to whatever the example is about, not to the
  * bundle. Inline code is kept, because that is how the skills that ship with
  * hcm point at their own supporting files.
+ *
+ * What inline code does *not* keep is a declared reference written inside it.
+ * Documentation about markdown is full of them --
+ *
+ *     the syntax says its target is a path: `[text](path)`, `[[wikilink]]`
+ *
+ * -- and none of those is a link, in the sense that no reader will ever follow
+ * one. A backtick span is a display, so its contents are considered only as the
+ * one `code` candidate they visibly are.
  */
 function extractFromMarkdown(text: string): Candidate[] {
   const masked = maskFences(text);
   const candidates: Candidate[] = [];
+
+  const codeSpans = [...masked.matchAll(INLINE_CODE)].map((match) => ({
+    start: match.index as number,
+    end: (match.index as number) + match[0].length,
+  }));
+  const shown = (at: number): boolean =>
+    codeSpans.some((span) => at > span.start && at < span.end);
 
   // ![alt](target) and [text](target), with optional "title" after the target.
   const link = /(!?)\[[^\]\n]*\]\(\s*([^)\s]+)(?:\s+"[^"]*")?\s*\)/g;
@@ -332,6 +521,18 @@ function extractFromMarkdown(text: string): Candidate[] {
       start: offset,
       end: offset + stripAnchor(target).length,
     });
+  }
+
+  // [[target]], [[target|alias]], [[target#heading]] -- the wiki convention.
+  // The alias and the heading are not part of the path; only the target is
+  // offset-recorded, so a fix rewrites the target and leaves the rest alone.
+  const wiki = /\[\[([^[\]\n]+)\]\]/g;
+  for (const match of masked.matchAll(wiki)) {
+    const inner = match[1] as string;
+    const target = stripAnchor((inner.split('|')[0] as string)).trim();
+    if (!target) continue;
+    const offset = (match.index as number) + 2 + inner.indexOf(target);
+    candidates.push({ ref: target, syntax: 'wikilink', start: offset, end: offset + target.length });
   }
 
   // [id]: target -- a link definition, at the start of a line.
@@ -349,8 +550,7 @@ function extractFromMarkdown(text: string): Candidate[] {
 
   // `target` -- single-backtick inline code only; a double-backtick span is
   // nearly always code containing a backtick, not a path.
-  const code = /(?<!`)`([^`\n]+)`(?!`)/g;
-  for (const match of masked.matchAll(code)) {
+  for (const match of masked.matchAll(INLINE_CODE)) {
     const inner = (match[1] as string).trim();
     const offset = (match.index as number) + 1 + (match[1] as string).indexOf(inner);
     candidates.push({ ref: inner, syntax: 'code', start: offset, end: offset + inner.length });
@@ -364,7 +564,9 @@ function extractFromMarkdown(text: string): Candidate[] {
     candidates.push({ ref: target, syntax: 'mention', start: offset, end: offset + target.length });
   }
 
-  return candidates.sort((a, b) => a.start - b.start);
+  return candidates
+    .filter((candidate) => candidate.syntax === 'code' || !shown(candidate.start))
+    .sort((a, b) => a.start - b.start);
 }
 
 /**
@@ -441,6 +643,10 @@ export function looksLikePath(ref: string, syntax: RefSyntax): boolean {
   const first = value.replace(/^\.\//, '').split('/')[0] as string;
   if (value.includes('/') && first.startsWith('.') && first !== '.' && first !== '..') return false;
 
+  // A wikilink names a file rather than spelling a path to it: spaces are
+  // ordinary in one, and the extension is normally left off entirely.
+  if (syntax === 'wikilink') return true;
+
   const linkish = syntax === 'link' || syntax === 'image' || syntax === 'definition';
 
   // A link may legitimately point at a directory, so it needs no extension.
@@ -463,14 +669,17 @@ export function looksLikePath(ref: string, syntax: RefSyntax): boolean {
 /**
  * Written as a reference, or merely shaped like one.
  *
- * Link syntax says outright that it is a reference. So does a separator: a bare
- * `checklist.md` in a sentence might be prose, but `skills/audit/checklist.md`
+ * Declared syntax says outright that it is a reference, and so does an explicit
+ * `./`. A separator is weaker evidence but still evidence: a bare
+ * `checklist.md` in a sentence might be prose, while `skills/audit/checklist.md`
  * is nobody's turn of phrase.
+ *
+ * Only `--all-paths` can produce anything but `strong`, which is the point --
+ * the narrow scope admits nothing it is unsure about.
  */
 function confidenceOf(ref: string, syntax: RefSyntax): RefConfidence {
-  if (syntax === 'link' || syntax === 'image' || syntax === 'definition' || syntax === 'mention') {
-    return 'strong';
-  }
+  if (DECLARED_SYNTAXES.has(syntax)) return 'strong';
+  if (isExplicitlyRelative(ref)) return 'strong';
   return ref.includes('/') ? 'strong' : 'weak';
 }
 
@@ -478,34 +687,99 @@ function confidenceOf(ref: string, syntax: RefSyntax): RefConfidence {
 // Resolution
 // ---------------------------------------------------------------------------
 
+export interface ResolveOptions {
+  /** Wikilinks resolve by name as well as by path; nothing else does. */
+  syntax?: RefSyntax;
+  /** Files under the scan root, for the name lookup a wikilink needs. */
+  index?: readonly RefIndexEntry[];
+}
+
+export interface Resolution {
+  target?: string;
+  via?: 'file' | 'bundle' | 'name';
+}
+
 /**
  * Where a reference points, trying both roots a bundle author might have meant.
  *
  * The bundle root comes first: that is the convention `hcm` installs against
  * (see refmap.ts), so a path that resolves both ways is read as the bundle-
  * relative one. The file-relative fallback is what makes a skill's
- * `checklist.md` work, and what keeps every bundle written before this existed
- * resolving as it always did.
+ * `./checklist.md` work, and what keeps every bundle written before this
+ * existed resolving as it always did.
+ *
+ * A wikilink is the exception, because it is a name and not a path. `[[release
+ * checklist]]` gets its extension guessed, and then, failing both roots, is
+ * looked up by name anywhere in the same bundle -- which is how every tool that
+ * reads wikilinks resolves them, and the only reading under which the common
+ * form of one resolves at all.
  */
 export async function resolveRef(
   ref: string,
   file: string,
   bundleRoot?: string,
-): Promise<{ target?: string; via?: 'file' | 'bundle' }> {
+  options: ResolveOptions = {},
+): Promise<Resolution> {
   const cleaned = stripAnchor(ref.trim()).replace(/^\.\//, '');
   if (!cleaned) return {};
 
-  const segments = cleaned.split('/');
+  const wiki = options.syntax === 'wikilink';
 
-  if (bundleRoot && !cleaned.startsWith('..')) {
-    const fromBundle = path.resolve(bundleRoot, ...segments);
-    if (await pathExists(fromBundle)) return { target: fromBundle, via: 'bundle' };
+  for (const candidate of wiki ? wikilinkCandidates(cleaned) : [cleaned]) {
+    const segments = candidate.split('/');
+
+    if (bundleRoot && !candidate.startsWith('..')) {
+      const fromBundle = path.resolve(bundleRoot, ...segments);
+      if (await pathExists(fromBundle)) return { target: fromBundle, via: 'bundle' };
+    }
+
+    const fromFile = path.resolve(path.dirname(file), ...segments);
+    if (await pathExists(fromFile)) return { target: fromFile, via: 'file' };
   }
 
-  const fromFile = path.resolve(path.dirname(file), ...segments);
-  if (await pathExists(fromFile)) return { target: fromFile, via: 'file' };
+  if (wiki && options.index) {
+    const named = findByName(cleaned, options.index, bundleRoot);
+    if (named) return { target: named, via: 'name' };
+  }
 
   return {};
+}
+
+/**
+ * The paths one wikilink might mean, likeliest first.
+ *
+ * `[[notes]]` is a markdown file called notes far more often than it is a
+ * directory called notes, so the extensions are tried before the bare name. A
+ * wikilink that already carries an extension is taken at its word.
+ */
+function wikilinkCandidates(value: string): string[] {
+  const extension = path.posix.extname(value).replace('.', '').toLowerCase();
+  if (extension && REFERENCE_EXTENSIONS.has(extension)) return [value];
+  return [`${value}.md`, `${value}.markdown`, `${value}.mdx`, value];
+}
+
+/**
+ * A wikilink resolved the way wiki tools resolve one: by the name of the file,
+ * wherever it happens to sit.
+ *
+ * Confined to the bundle doing the referring. A wikilink reaching into a
+ * sibling bundle would not survive installation -- the two need not be
+ * installed together, and refmap.ts cannot rewrite a name into a path without
+ * destroying it -- so treating that as resolved would be a lie.
+ */
+function findByName(
+  ref: string,
+  index: readonly RefIndexEntry[],
+  bundleRoot?: string,
+): string | undefined {
+  const wanted = stem(path.posix.basename(ref));
+  if (!wanted) return undefined;
+
+  const matches = index.filter(
+    (entry) => stem(entry.base) === wanted && (bundleRoot === undefined || entry.bundleRoot === bundleRoot),
+  );
+
+  return matches[0]?.absolute;
 }
 
 // ---------------------------------------------------------------------------
@@ -600,15 +874,28 @@ export function suggestFixes(ref: ResolvedRef, index: RefIndexEntry[], limit = 3
 /**
  * How a suggestion should be written.
  *
- * Bundle-relative for anything in the same bundle -- the form `hcm` remaps on
- * install. Anything else can only be said relative to the file itself, which is
- * a reference that will not survive installation; the report says so.
+ * In the same form it is replacing, or the fix would not be a fix.
+ *
+ * A wikilink takes the file's name without its extension, which is what a
+ * wikilink holds. A reference the author wrote `./like this` keeps its prefix:
+ * that prefix is what put it in scope in the first place, and a "fix" that
+ * quietly turned it into a bare path would drop it out of every later check.
+ * Everything else takes a bundle-relative path, the form `hcm` remaps on
+ * install -- or, for a file in another bundle, one relative to the referring
+ * file, which is a reference that will not survive installation; the report
+ * says so.
  */
 function suggestionPath(entry: RefIndexEntry, ref: ResolvedRef): string {
+  if (ref.syntax === 'wikilink') return path.basename(entry.absolute, path.extname(entry.absolute));
+
+  const fromFile = toPosix(path.relative(path.dirname(ref.file), entry.absolute));
+
+  if (isExplicitlyRelative(ref.ref)) return fromFile.startsWith('..') ? fromFile : `./${fromFile}`;
+
   if (ref.bundleRoot && entry.bundleRoot === ref.bundleRoot) {
     return toPosix(path.relative(ref.bundleRoot, entry.absolute));
   }
-  return toPosix(path.relative(path.dirname(ref.file), entry.absolute));
+  return fromFile;
 }
 
 /** Filename without its extension, lowercased. */

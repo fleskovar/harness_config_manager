@@ -1,0 +1,37 @@
+{
+  "scope": {
+    "links": true,
+    "allPaths": false,
+    "strict": false
+  },
+  "broken": [
+    {
+      "file": "context/welcome.md",
+      "ref": "context/glosary.md",
+      "syntax": "link",
+      "suggestions": [
+        "context/glossary.md"
+      ]
+    },
+    {
+      "file": "context/welcome.md",
+      "ref": "assets/org-chart.png",
+      "syntax": "image",
+      "suggestions": []
+    },
+    {
+      "file": "skills/onboard/SKILL.md",
+      "ref": "code-review",
+      "syntax": "wikilink",
+      "suggestions": [
+        "code-review-guide"
+      ]
+    },
+    {
+      "file": "skills/onboard/SKILL.md",
+      "ref": "on-call-rota",
+      "syntax": "wikilink",
+      "suggestions": []
+    }
+  ]
+}

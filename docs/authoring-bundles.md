@@ -659,8 +659,10 @@ though a path a *harness* resolves rather than an agent is worth checking with
 `hcm info` first; see the note in the [README](../README.md#references-written-once-repointed-on-the-way-in).
 
 What is *not* rewritten: URLs, anchors, absolute paths, `${VAR}` paths, paths
-into the user's own project (`src/index.ts`), and anything inside a fenced code
-block. A reference naming a file this target does not install is left as written
+into the user's own project (`src/index.ts`), anything inside a fenced code
+block, and `[[wikilinks]]` — a wikilink is a name rather than a path, it
+survives the move on its own, and turning one into a relative path would break
+it. A reference naming a file this target does not install is left as written
 and reported — worth reading, because it is an instruction the agent will follow.
 
 Check the ones that point at nothing before you publish:
@@ -669,6 +671,20 @@ Check the ones that point at nothing before you publish:
 hcm refs check --path .        # report
 hcm refs fix   --path .        # repair, by picking from a ranked list
 ```
+
+`check` reads what you **wrote as a reference**: markdown links, images, link
+definitions, `[[wikilinks]]`, `@paths`, and any path carrying an explicit `./`
+or `../`. A bare filename in a sentence is prose and is left alone —
+
+```markdown
+A file will be created named `report.txt`.
+```
+
+— which is why a reference to one of the bundle's own files is worth writing
+`./like-this.md`, even where the bare form would resolve. Two flags move the
+line: `--links` narrows to links and wikilinks only, and `--all-paths` (or
+`--strict`, which is louder still) widens to every path-shaped thing in the
+bundle, prose included.
 
 `hcm info <bundle>` prints the rewrites per target, so you can see what each
 harness will actually read.

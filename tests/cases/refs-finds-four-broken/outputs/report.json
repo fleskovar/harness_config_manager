@@ -1,30 +1,39 @@
 {
+  "scope": {
+    "links": false,
+    "allPaths": false,
+    "strict": false
+  },
   "broken": [
     {
       "file": "commands/review-pr.md",
       "ref": "context/conventions.md",
+      "syntax": "link",
       "suggestions": [
         "context/10-conventions.md"
       ]
     },
     {
       "file": "mcp/formatter.json",
-      "ref": "assets/format.sh",
+      "ref": "../assets/format.sh",
+      "syntax": "config",
       "suggestions": [
-        "assets/format-code.sh"
+        "../assets/format-code.sh"
       ]
     },
     {
       "file": "skills/release-audit/SKILL.md",
-      "ref": "checklist.md",
+      "ref": "./checklist.md",
+      "syntax": "code",
       "suggestions": [
-        "skills/release-audit/release-checklist.md",
-        "rules/typescript.md"
+        "./release-checklist.md",
+        "../../rules/typescript.md"
       ]
     },
     {
       "file": "subagents/code-reviewer.md",
       "ref": "rules/typescrpt.md",
+      "syntax": "link",
       "suggestions": [
         "rules/typescript.md"
       ]

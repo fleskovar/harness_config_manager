@@ -484,6 +484,10 @@ contextSubcommand('remove', 'take the sections out, keeping the cached copies')
  * applies the ones you pick. Both take a folder rather than a bundle name: a
  * reference is a fact about files on disk, and the folder may hold a whole
  * collection whose bundles point at each other.
+ *
+ * Both read the same three scope flags, and `fix` needs them to match the ones
+ * `check` was run with -- it re-scans before applying, and a narrower scope
+ * would not find the references the fix file was written for.
  */
 const refs = program
   .command('refs')
@@ -492,21 +496,43 @@ const refs = program
 const refsPathOption = () =>
   new Option('-p, --path <path>', 'folder to scan (a bundle, or a collection of them)').default('.');
 
-const strictOption = () =>
-  new Option(
-    '--strict',
-    'also report bare filenames that look like references but match nothing',
-  );
+/**
+ * The three flags that decide what counts as a reference.
+ *
+ * The default is the quiet one -- links, wikilinks and paths written with an
+ * explicit `./` -- because a bundle's prose is full of filename-shaped text
+ * that is not a reference to anything. The other two widen or narrow it.
+ */
+const scopeOptions = <T extends Command>(command: T): T =>
+  command
+    .addOption(
+      new Option('--links', 'only check links, images, link definitions and [[wikilinks]]'),
+    )
+    .addOption(
+      new Option(
+        '--all-paths',
+        'also check implicit paths and bare filenames in inline code and config values',
+      ),
+    )
+    .addOption(
+      new Option(
+        '--strict',
+        'implies --all-paths, and reports bare filenames that match nothing at all',
+      ),
+    );
 
-refs
-  .command('check', { isDefault: true })
-  .description('report every file reference that points at nothing')
-  .addOption(refsPathOption())
-  .addOption(strictOption())
+scopeOptions(
+  refs
+    .command('check', { isDefault: true })
+    .description('report every file reference that points at nothing')
+    .addOption(refsPathOption()),
+)
   .option('--json', 'machine-readable output')
   .action(async (options) => {
     const ok = await refsCheckCommand({
       path: options.path,
+      links: options.links,
+      allPaths: options.allPaths,
       strict: options.strict,
       json: options.json,
       cwd,
@@ -514,17 +540,20 @@ refs
     if (!ok) process.exitCode = 1;
   });
 
-refs
-  .command('fix')
-  .description('write the broken references to a JSON file, then apply what you leave in it')
-  .addOption(refsPathOption())
-  .addOption(strictOption())
+scopeOptions(
+  refs
+    .command('fix')
+    .description('write the broken references to a JSON file, then apply what you leave in it')
+    .addOption(refsPathOption()),
+)
   .option('--write [file]', `save the JSON in the working directory instead of opening an editor`)
   .option('--file <path>', 'apply an already-edited JSON file')
   .option('--dry-run', 'show what would change without writing')
   .action(async (options) => {
     const ok = await refsFixCommand({
       path: options.path,
+      links: options.links,
+      allPaths: options.allPaths,
       strict: options.strict,
       write: options.write,
       file: options.file,
