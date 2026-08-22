@@ -1,0 +1,14 @@
+{
+  "describes": "a hand-edited item stops the update of its own harness without removing anything, and the other harness still updates",
+  "recordState": true,
+  "steps": [
+    { "register": "review-kit", "dev": true },
+    { "install": "review-kit", "targets": ["claude-code", "pi"] },
+    {
+      "appendFile": ".pi/skills/dependency-audit/SKILL.md",
+      "text": "\n<!-- A note somebody added locally. -->\n"
+    },
+    { "replaceBundle": "review-kit", "with": "review-kit-v2" },
+    { "update": "review-kit", "targets": ["all"] }
+  ]
+}

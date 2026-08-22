@@ -1304,10 +1304,13 @@ Register its source and it joins the next run.
 It is a rollback followed by an install, not a write-over-the-top, because a new
 version is defined as much by what it *removed*: a subagent deleted upstream has
 to disappear from the harness too. Items you hand-edited since installing still
-block the way they do for `hcm uninstall`, and `--force` still overrides — an
-update never silently discards your changes. Anything the new version now
-collides with is put to you the same way `hcm install` does, and `--on-conflict`
-works here too.
+block, and `--force` still overrides — an update never silently discards your
+changes. The block is all-or-nothing per installation, which is where it differs
+from `hcm uninstall`: an update that cannot remove everything removes nothing,
+leaves that harness exactly as it is, and carries on to the others, because it
+would not install the new version over a half-removed old one. Anything the new
+version now collides with is put to you the same way `hcm install` does, and
+`--on-conflict` works here too.
 
 Bundles that are registered but not installed anywhere just get their stored
 copy refreshed.

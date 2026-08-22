@@ -243,6 +243,11 @@ function dependsOn(record: InstallationRecord, bundle: string): boolean {
  * Roll one installation back and drop its ledger entry. Returns false when
  * hand-edited items blocked it, or when this was a dry run -- `hcm update`
  * uses that to decide whether reinstalling on top is safe.
+ *
+ * Blocked means *partly* removed by default, which is what `hcm uninstall`
+ * wants: you asked for the items to go, so the seven that can go should go and
+ * the one that cannot should say so. `allOrNothing` is for the caller that
+ * cannot live with a half-removal -- see below.
  */
 export async function rollbackInstallation(
   record: InstallationRecord,
@@ -254,6 +259,17 @@ export async function rollbackInstallation(
     alsoRemoving?: string[];
     /** Harnesses set up in this folder; see `core/harnesses.ts`. Detected when absent. */
     presentTargets?: TargetId[];
+    /**
+     * Remove everything or nothing: if any item is blocked, leave the whole
+     * installation exactly as it is.
+     *
+     * `hcm update` needs this. It is rollback-then-install, and it refuses to
+     * install over a removal that did not finish -- so with the default
+     * behaviour one hand-edited file would take the rest of the installation
+     * away and put nothing back, which is the opposite of the promise that an
+     * update never discards local changes.
+     */
+    allOrNothing?: boolean;
   },
 ): Promise<boolean> {
   const target = getTarget(record.target);
@@ -262,6 +278,28 @@ export async function rollbackInstallation(
   const claims = await collectClaims(options.cwd, {
     excludeIds: [record.id, ...(options.alsoRemoving ?? [])],
   });
+
+  // Asked in a pass that writes nothing, before the pass that does: whether an
+  // item is blocked is only known once its hash has been compared, and by then
+  // the removal is already several files in. `--force` removes edited items
+  // anyway, so it has nothing to ask.
+  if (options.allOrNothing && !options.dryRun && !options.force) {
+    const blocked = (await rollback(record, scopeRoot, { dryRun: true, claims })).filter(
+      (result) => result.status === 'modified',
+    );
+
+    if (blocked.length > 0) {
+      for (const result of blocked) {
+        const detail = result.detail ? color.dim(` (${result.detail})`) : '';
+        log.info(`  ${STATUS_STYLE.modified(pad(result.status))} ${describeReceipt(result.receipt)}${detail}`);
+      }
+      log.warn(
+        `  ${blocked.length} item(s) were modified since install; nothing was removed and ` +
+          'this installation was left exactly as it is.',
+      );
+      return false;
+    }
+  }
 
   const results = await rollback(record, scopeRoot, {
     force: options.force ?? false,

@@ -448,13 +448,21 @@ async function reinstall(
     cwd: options.cwd,
     dryRun: options.dryRun ?? false,
     force: options.force ?? false,
+    // All of it or none of it. An update that could not remove the old version
+    // will not write the new one over the top -- so a removal that stopped
+    // half way would leave the harness with neither, which is exactly the
+    // local work the block was there to protect. See `rollbackInstallation`.
+    allOrNothing: true,
   });
 
   // A dry run reports the removal and then the install it *would* have done;
   // a real run that could not remove the old items must not write new ones on
   // top of them, or the two versions would be interleaved with no way back.
   if (!rolledBack && !options.dryRun) {
-    log.warn('  skipped: could not remove the installed version cleanly');
+    log.warn('  skipped: the installed version is still there, unchanged');
+    log.warn(
+      color.dim('  revert the edit(s), or re-run with --force to replace them'),
+    );
     return;
   }
 
