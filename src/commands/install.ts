@@ -23,10 +23,12 @@ import {
 } from '../core/flavors.js';
 import { describeSource } from '../core/github.js';
 import {
+  chooseTargets,
   detectHarnesses,
   expandTargets,
   type HarnessPresence,
   requireTargetChoice,
+  type TargetChooser,
   warnIfWiderThanTheFolder,
 } from '../core/harnesses.js';
 import { color, log } from '../core/logger.js';
@@ -114,6 +116,11 @@ export interface InstallOptions {
    * absent, like `decisions`.
    */
   answers?: Map<string, string>;
+  /**
+   * Test seam: answers the 'which harness?' question instead of the terminal.
+   * See `chooseTargets` in core/harnesses.ts.
+   */
+  targetChooser?: TargetChooser;
   /** Install only what was named, leaving its `dependencies` to fail later. */
   noDeps?: boolean;
   /**
@@ -170,7 +177,7 @@ export async function installCommand(
   // and the parameter values typed at the prompt.
   const decisions = options.decisions ?? new Map<string, Resolution>();
   const answers = options.answers ?? new Map<string, string>();
-  const chosen = expandTargets(options.targets);
+  let chosen = expandTargets(options.targets);
 
   // Read before anything is planned, so a malformed assignment or a missing
   // file stops the run rather than the second bundle of five.
@@ -209,6 +216,24 @@ export async function installCommand(
   if (options.noDeps) warnAboutSkippedDependencies(roots);
   else logDependencyTree(graph, roots);
 
+  // No -t: rather than silently installing into every harness these bundles
+  // support, offer them -- with what this folder is already set up for ticked.
+  // Asked here, after the graph, so a bad reference or an unresolvable
+  // dependency still fails before the user is made to answer anything.
+  if (!chosen) {
+    const picked = await chooseTargets({
+      available: supportedTargets(roots),
+      scope: options.scope,
+      cwd: options.cwd,
+      ...(options.targetChooser ? { chooser: options.targetChooser } : {}),
+      ...(options.prompt === false ? { prompt: false } : {}),
+    });
+    if (picked) {
+      chosen = picked;
+      options = { ...options, targets: picked };
+    }
+  }
+
   const targets = targetsPerBundle(graph, options);
   const affected = [...new Set([...targets.values()].flat())];
 
@@ -240,6 +265,22 @@ export async function installCommand(
         : {}),
     });
   }
+}
+
+/**
+ * The harnesses worth offering when nobody said which: every one the bundles
+ * named on the command line support.
+ *
+ * Only the named ones. A dependency goes wherever its dependents go -- it is
+ * not something the user is choosing -- so a dependency that happens to support
+ * one extra harness must not put that harness on the menu.
+ */
+function supportedTargets(roots: LoadedBundle[]): TargetId[] {
+  const supported = new Set<TargetId>();
+  for (const bundle of roots) {
+    for (const id of bundle.manifest.targets ?? TARGET_IDS) supported.add(getTarget(id).id);
+  }
+  return TARGET_IDS.filter((id) => supported.has(id));
 }
 
 /**

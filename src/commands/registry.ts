@@ -9,6 +9,7 @@ import { storeDir } from '../core/paths.js';
 import {
   addToRegistry,
   asList,
+  liveEntries,
   readRegistry,
   removeFromRegistry,
   requireEntry,
@@ -134,20 +135,22 @@ async function installationsOf(bundle: string, cwd: string): Promise<string[]> {
 
 export async function registryListCommand(options: { json?: boolean }): Promise<void> {
   const registry = await readRegistry();
+  // Read from the working copy for dev entries -- see liveEntry in core/registry.
+  const entries = await liveEntries(registry.entries);
 
   if (options.json) {
-    log.plain(JSON.stringify(registry.entries, null, 2));
+    log.plain(JSON.stringify(entries, null, 2));
     return;
   }
 
-  if (registry.entries.length === 0) {
+  if (entries.length === 0) {
     log.info('No bundles registered.');
     return;
   }
 
-  const width = Math.max(...registry.entries.map((entry) => entry.id.length));
+  const width = Math.max(...entries.map((entry) => entry.id.length));
 
-  for (const entry of registry.entries) {
+  for (const entry of entries) {
     const mode = entry.dev ? color.yellow(' [dev]') : '';
     log.plain(
       `${color.dim(entry.id.padStart(width))}  ${color.bold(entry.name)} ` +

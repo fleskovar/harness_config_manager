@@ -167,6 +167,83 @@ export async function loadBundlesFrom(
   return Promise.all(dirs.map((dir) => loadBundle(dir, narrowSource(source, root, dir))));
 }
 
+// ---------------------------------------------------------------------------
+// Bundle metadata, as the registry keeps it
+// ---------------------------------------------------------------------------
+
+/**
+ * The part of a registry entry that is a copy of the bundle: what it is called
+ * itself, what it can be installed as, what it will ask for on the way in.
+ *
+ * Kept in one place because three callers have to agree on it -- registering,
+ * refreshing, and the listings, which read a dev bundle live rather than
+ * trusting the copy.
+ */
+function bundleMetadata(bundle: LoadedBundle): Partial<RegistryEntry> {
+  return {
+    version: bundle.manifest.version,
+    ...(bundle.manifest.description ? { description: bundle.manifest.description } : {}),
+    ...(bundle.manifest.tags ? { tags: bundle.manifest.tags } : {}),
+    ...(bundle.dependencies.length > 0 ? { dependencies: bundle.dependencies } : {}),
+    ...(bundle.flavors.length > 0 ? { flavors: summarizeFlavors(bundle.flavors) } : {}),
+    ...(bundle.parameters.length > 0
+      ? { parameters: summarizeParameters(bundle.parameters) }
+      : {}),
+  };
+}
+
+/**
+ * An entry restated in terms of the bundle as it now stands.
+ *
+ * Replaced wholesale rather than merged, so a flavor, a parameter or a
+ * dependency dropped upstream stops being advertised here.
+ */
+function withBundleMetadata(entry: RegistryEntry, bundle: LoadedBundle): RegistryEntry {
+  const updated: RegistryEntry = { ...entry, ...bundleMetadata(bundle) };
+
+  if (!bundle.manifest.description) delete updated.description;
+  if (!bundle.manifest.tags) delete updated.tags;
+  if (bundle.dependencies.length === 0) delete updated.dependencies;
+  if (bundle.flavors.length === 0) delete updated.flavors;
+  if (bundle.parameters.length === 0) delete updated.parameters;
+
+  return updated;
+}
+
+/**
+ * An entry as it would read if the registry were written again right now.
+ *
+ * A snapshotted entry is already exactly that: nothing about it changes until
+ * "hcm update" re-reads the source. A `--dev` entry is not. It points at a
+ * working copy that is edited between commands -- that is the whole point of
+ * registering one -- so the version, flavors and parameters recorded when it
+ * was added describe the bundle as it was that day, not as it is. A listing
+ * that showed those would tell you a bundle offers one flavor while its
+ * manifest declares five.
+ *
+ * Reading the working copy costs one bundle load per dev entry, which is why
+ * this is done by the listings and not by `readRegistry` itself. Nothing is
+ * written back: a listing is a question, not an edit.
+ *
+ * A working copy that has moved or gone falls back to what was recorded, so
+ * `hcm list` still lists it rather than failing on one bad entry.
+ */
+export async function liveEntry(entry: RegistryEntry): Promise<RegistryEntry> {
+  if (!entry.dev) return entry;
+
+  try {
+    const bundle = await loadBundle(await entryDir(entry), entry.source);
+    return withBundleMetadata(entry, bundle);
+  } catch {
+    return entry;
+  }
+}
+
+/** `liveEntry` for a whole registry, in the order given. */
+export function liveEntries(entries: RegistryEntry[]): Promise<RegistryEntry[]> {
+  return Promise.all(entries.map((entry) => liveEntry(entry)));
+}
+
 /** Register a bundle, or every bundle in a collection. */
 export async function addToRegistry(
   input: string,
@@ -205,14 +282,7 @@ export async function addToRegistry(
       id,
       name,
       source: bundle.source,
-      version: bundle.manifest.version,
-      ...(bundle.manifest.description ? { description: bundle.manifest.description } : {}),
-      ...(bundle.manifest.tags ? { tags: bundle.manifest.tags } : {}),
-      ...(bundle.dependencies.length > 0 ? { dependencies: bundle.dependencies } : {}),
-      ...(bundle.flavors.length > 0 ? { flavors: summarizeFlavors(bundle.flavors) } : {}),
-      ...(bundle.parameters.length > 0
-        ? { parameters: summarizeParameters(bundle.parameters) }
-        : {}),
+      ...bundleMetadata(bundle),
       ...(options.dev ? { dev: true } : { store: storeSlug({ id, name }) }),
       addedAt: existing?.addedAt ?? new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -286,25 +356,10 @@ async function persistRefresh(
   const previousVersion = current.version;
 
   const updated: RegistryEntry = {
-    ...current,
-    version: bundle.manifest.version,
-    ...(bundle.manifest.description ? { description: bundle.manifest.description } : {}),
-    ...(bundle.manifest.tags ? { tags: bundle.manifest.tags } : {}),
-    // Replaced wholesale, so a dependency dropped upstream disappears here too.
-    ...(bundle.dependencies.length > 0 ? { dependencies: bundle.dependencies } : {}),
-    ...(bundle.flavors.length > 0 ? { flavors: summarizeFlavors(bundle.flavors) } : {}),
-    ...(bundle.parameters.length > 0
-      ? { parameters: summarizeParameters(bundle.parameters) }
-      : {}),
+    ...withBundleMetadata(current, bundle),
     ...(entry.dev ? {} : { store: entry.store ?? storeSlug(entry) }),
     updatedAt: new Date().toISOString(),
   };
-
-  // A bundle that has stopped requiring anything should stop saying it does,
-  // and the same for a flavor dropped upstream.
-  if (bundle.dependencies.length === 0) delete updated.dependencies;
-  if (bundle.flavors.length === 0) delete updated.flavors;
-  if (bundle.parameters.length === 0) delete updated.parameters;
 
   const index = registry.entries.indexOf(current);
   if (index >= 0) registry.entries[index] = updated;

@@ -176,7 +176,8 @@ const paramsFileOption = () =>
 const noPromptOption = () =>
   new Option(
     '--no-prompt',
-    'never ask for a parameter value: use what is supplied, then the defaults',
+    'never ask a question: use what is supplied, then the defaults -- no parameter ' +
+      'values, and no menu of harnesses when -t is omitted',
   );
 
 program

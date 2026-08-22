@@ -2,7 +2,7 @@ import { flavorNames } from '../core/flavors.js';
 import { parameterNames } from '../core/parameters.js';
 import { describeSource } from '../core/github.js';
 import { color, log } from '../core/logger.js';
-import { readRegistry } from '../core/registry.js';
+import { liveEntries, readRegistry } from '../core/registry.js';
 import { readState } from '../core/state.js';
 import type { InstallationRecord, Scope } from '../core/types.js';
 
@@ -21,6 +21,9 @@ export async function listCommand(options: ListOptions): Promise<void> {
 
 async function listAvailable(options: ListOptions): Promise<void> {
   const registry = await readRegistry();
+  // A dev entry is a pointer at a working copy, not a copy of it, so what it
+  // offers today is in its manifest rather than in the registry. See liveEntry.
+  const entries = await liveEntries(registry.entries);
 
   // Mark which registered bundles are installed somewhere, so one listing answers
   // both "what can I install?" and "what is already here?".
@@ -33,7 +36,7 @@ async function listAvailable(options: ListOptions): Promise<void> {
   if (options.json) {
     log.plain(
       JSON.stringify(
-        registry.entries.map((entry) => ({ ...entry, installed: installed.has(entry.name) })),
+        entries.map((entry) => ({ ...entry, installed: installed.has(entry.name) })),
         null,
         2,
       ),
@@ -41,16 +44,16 @@ async function listAvailable(options: ListOptions): Promise<void> {
     return;
   }
 
-  if (registry.entries.length === 0) {
+  if (entries.length === 0) {
     log.info('No bundles registered.');
     log.info(color.dim('Add one with: hcm registry add <path|owner/repo>'));
     return;
   }
 
-  const nameWidth = Math.max(...registry.entries.map((entry) => entry.name.length));
-  const idWidth = Math.max(...registry.entries.map((entry) => entry.id.length));
+  const nameWidth = Math.max(...entries.map((entry) => entry.name.length));
+  const idWidth = Math.max(...entries.map((entry) => entry.id.length));
 
-  for (const entry of registry.entries) {
+  for (const entry of entries) {
     const marker = installed.has(entry.name) ? color.green('●') : color.dim('○');
     const version = entry.version ? color.dim(` v${entry.version}`) : '';
     const mode = entry.dev ? color.yellow(' [dev]') : '';

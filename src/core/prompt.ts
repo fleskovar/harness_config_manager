@@ -136,6 +136,93 @@ export async function select<T extends string>(
   }
 }
 
+/**
+ * Numbered multiple-choice menu: pick any number of the options, by number or
+ * by value, separated by spaces or commas, with `all` for every one.
+ *
+ * `selected` is what is ticked when the menu opens and what an empty answer
+ * takes -- which is how a question can carry a sensible default without the
+ * default being applied silently. Repeats until the answer names something, so
+ * an empty answer with nothing preselected asks again rather than returning a
+ * selection of nothing.
+ *
+ * The result is in menu order however the answer was typed, so two people who
+ * choose the same options get the same list.
+ */
+export async function multiSelect<T extends string>(
+  title: string,
+  choices: Choice<T>[],
+  selected: readonly T[] = [],
+): Promise<T[]> {
+  const ticked = new Set<T>(selected);
+  process.stdout.write(`${title}\n`);
+
+  for (const [index, choice] of choices.entries()) {
+    const mark = ticked.has(choice.value) ? color.bold('x') : ' ';
+    const detail = choice.detail ? color.dim(` -- ${choice.detail}`) : '';
+    process.stdout.write(`  [${mark}] ${index + 1}) ${choice.label}${detail}\n`);
+  }
+
+  const preset = choices
+    .map((choice, index) => (ticked.has(choice.value) ? String(index + 1) : undefined))
+    .filter((entry): entry is string => entry !== undefined);
+  const fallback = preset.length > 0 ? color.dim(` [${preset.join(',')}]`) : '';
+
+  for (;;) {
+    const answer = await ask(
+      `${color.cyan('?')} choose 1-${choices.length}, or "${ALL_CHOICES}"${fallback}: `,
+    );
+
+    if (answer === '' && ticked.size > 0) {
+      return choices.filter((choice) => ticked.has(choice.value)).map((choice) => choice.value);
+    }
+
+    const picked = readSelection(answer, choices);
+    if (picked) return picked;
+
+    process.stdout.write(
+      color.yellow('  pick one or more of the options, by number or by name\n'),
+    );
+  }
+}
+
+/** The word a multiple-choice menu accepts for "every option". */
+export const ALL_CHOICES = 'all';
+
+/**
+ * Read a multiple-choice answer, or undefined when it names nothing or names
+ * something that is not on the menu -- either way the question is asked again,
+ * because a typo that quietly selected less than was meant is the one outcome
+ * a menu must not have.
+ */
+export function readSelection<T extends string>(
+  answer: string,
+  choices: Choice<T>[],
+): T[] | undefined {
+  const tokens = answer.split(/[\s,]+/u).filter(Boolean);
+  if (tokens.length === 0) return undefined;
+
+  if (tokens.some((token) => token.toLowerCase() === ALL_CHOICES)) {
+    return choices.map((choice) => choice.value);
+  }
+
+  const picked = new Set<T>();
+
+  for (const token of tokens) {
+    const byNumber = Number.parseInt(token, 10);
+    if (String(byNumber) === token && byNumber >= 1 && byNumber <= choices.length) {
+      picked.add((choices[byNumber - 1] as Choice<T>).value);
+      continue;
+    }
+
+    const byName = choices.find((choice) => choice.value.toLowerCase() === token.toLowerCase());
+    if (!byName) return undefined;
+    picked.add(byName.value);
+  }
+
+  return choices.filter((choice) => picked.has(choice.value)).map((choice) => choice.value);
+}
+
 /** Yes or no, defaulting to the safe answer unless told otherwise. */
 export async function confirm(question: string, defaultValue = false): Promise<boolean> {
   const answer = await select<'yes' | 'no'>(

@@ -289,9 +289,30 @@ there is no half-applied list to unpick.
 
 ### Saying which harness you mean
 
-In a folder used by more than one harness, `hcm install my-kit` is not a
-complete instruction — it does not say into which. So it is refused rather than
-guessed at:
+`hcm install my-kit` without `-t` is not a complete instruction — it does not
+say into which harness. At a terminal, it asks, with the harnesses this folder
+is already set up for ticked:
+
+```
+Which harness(es) should this install into?
+  [x] 1) Claude Code -- already set up in this folder
+  [ ] 2) GitHub Copilot
+  [ ] 3) Reasonix
+  [ ] 4) OpenCode
+  [x] 5) Pi -- already set up in this folder
+? choose 1-5, or "all" [1,5]:
+```
+
+Answer with numbers or names, separated by spaces or commas, `all` for every
+one, or press enter to take what is ticked. What comes ticked is what hcm has
+installed here before — the ledger in `.hcm/` — and before there is one, the
+harnesses whose own directories are lying around. Only the harnesses the bundle
+supports are on the menu: a manifest with `targets: [claude-code, pi]` offers
+two lines, not five.
+
+`-t` skips the question, and so does `--no-prompt`. Without a terminal to ask —
+a script, a CI run — an operation that would span more than one harness in a
+folder set up for more than one is refused rather than guessed at:
 
 ```
 ✖ This folder is set up for more than one harness (Claude Code, Reasonix and Pi),
@@ -302,7 +323,7 @@ guessed at:
 ```
 
 `install`, `uninstall`, `update` and the three writing `hcm context` subcommands
-all ask, and `-t all` is the explicit form of the old blanket default.
+all refuse it, and `-t all` is the explicit form of the old blanket default.
 
 **It only asks when there is something to ask.** The question needs both a
 multi-harness folder *and* an operation spanning more than one of them, so
@@ -1247,7 +1268,11 @@ hcm install my-kit          # picks up the edit; nothing to refresh
 
 Dev entries are marked `[dev]` in `hcm list`, are read from your directory every
 time, and never have a copy in the store — so `hcm registry remove` unregisters
-them without touching your files. `--dev` is refused for GitHub sources: there
+them without touching your files. The listings read them live too: add a flavor
+or a parameter to `my-kit/hcm.yaml` and `hcm list` says so at once, with no
+`hcm update` in between. A registered *snapshot* is the other way round — `hcm
+list` describes the copy in the store, which is what an install would write,
+until `hcm update` moves it. `--dev` is refused for GitHub sources: there
 is nothing to edit in place. Clone the repo and register the clone.
 
 ### Updating
