@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createRequire } from 'node:module';
 import { Command, Option } from 'commander';
 import {
   configGetCommand,
@@ -48,13 +49,21 @@ import { TARGET_IDS } from './targets/index.js';
 const program = new Command();
 const cwd = process.cwd();
 
+// Read the version off package.json rather than repeating it here, so that
+// `npm version` is the only place a release bump has to happen. The relative
+// path holds in both layouts: src/cli.ts under tsx, and dist/cli.js in the
+// published tarball, are each one directory below package.json.
+const { version } = createRequire(import.meta.url)('../package.json') as {
+  version: string;
+};
+
 program
   .name('hcm')
   .description(
     'Define agents, skills, commands, rules and MCP servers once; install them into ' +
       'Claude Code, GitHub Copilot, Reasonix, OpenCode and Pi with exact, item-level rollback.',
   )
-  .version('0.1.0')
+  .version(version)
   .option('-q, --quiet', 'suppress non-essential output')
   .option('-v, --verbose', 'show skipped resources and other details')
   .hook('preAction', (thisCommand) => {

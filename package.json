@@ -2,6 +2,15 @@
   "name": "harness-config-manager",
   "version": "0.1.0",
   "description": "Define agents, skills, commands, rules and MCP servers once; install them into Claude Code, GitHub Copilot, Reasonix, OpenCode and Pi with exact, item-level rollback.",
+  "author": "Francisco Leskovar <francisco.leskovar@gmail.com>",
+  "homepage": "https://github.com/fleskovar/harness_config_manager#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fleskovar/harness_config_manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/fleskovar/harness_config_manager/issues"
+  },
   "type": "module",
   "bin": {
     "hcm": "./dist/cli.js"
@@ -11,7 +20,8 @@
   "files": [
     "dist",
     "docs",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=20"
@@ -25,7 +35,7 @@
     "bless": "node -e \"process.env.UPDATE_BASELINES=1;require('child_process').execSync('npx vitest run tests/case-runner.test.ts',{stdio:'inherit',env:{...process.env,UPDATE_BASELINES:'1'}})\"",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "npm run typecheck && npm run test && npm run build",
     "debug:case": "node --inspect-brk --import tsx tests/run-case.ts",
     "case": "tsx tests/run-case.ts"
   },
@@ -57,5 +67,8 @@
     "mcp",
     "cli"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
 }

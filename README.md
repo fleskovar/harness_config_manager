@@ -16,8 +16,27 @@ Supported targets:
 
 ## Install
 
-Requires Node 20 or newer. `make setup` checks this first and tells you what
-to do if your Node is too old.
+Requires Node 20 or newer.
+
+```bash
+npm install -g harness-config-manager   # puts `hcm` on your PATH
+hcm --version
+```
+
+To try it without installing anything:
+
+```bash
+npx harness-config-manager list
+```
+
+Note the package name is the full `harness-config-manager`, not `hcm`. `npx`
+resolves the *package* name, and `hcm` on npm is an unrelated package. Once
+installed, the command itself is `hcm`.
+
+### From source
+
+For working on hcm itself. `make setup` checks your Node version first and
+tells you what to do if it is too old.
 
 ```bash
 make setup        # install dependencies, build, run the checks
