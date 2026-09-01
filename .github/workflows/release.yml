@@ -1,11 +1,11 @@
 # Publishes the package to npm when a v* tag is pushed.
 #
-# Setup, once:
-#   1. Create an npm automation token: npmjs.com -> Access Tokens -> Generate ->
-#      Granular Access (or Classic "Automation"). Automation tokens bypass 2FA,
-#      which a workflow cannot answer.
-#   2. Add it to the repo as the secret NPM_TOKEN:
-#      Settings -> Secrets and variables -> Actions -> New repository secret.
+# Authentication is by npm Trusted Publishing: npm accepts a short lived OIDC
+# token minted by GitHub for this exact workflow, so there is no long lived
+# publish token to store, rotate or leak.
+#
+# The trusted publisher registered on npm names this file by path, so renaming
+# or moving it breaks publishing until the npm side is updated to match.
 #
 # Release, each time:
 #   npm version patch   # bumps package.json and creates the matching v* tag
@@ -20,8 +20,9 @@ on:
 
 permissions:
   contents: read
-  # Required for npm provenance: the workflow signs the package with a short
-  # lived OIDC token so npm can attest which commit and workflow built it.
+  # Required twice over: it is how the runner mints the OIDC token that npm
+  # trades for publish rights, and how the published package gets its provenance
+  # attestation tying it to this commit and workflow.
   id-token: write
 
 jobs:
@@ -35,6 +36,14 @@ jobs:
           node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm 11.5.1 or newer; Node 22 still bundles
+      # npm 10.9.x, which has no OIDC support and fails with an authentication
+      # error that reads like a misconfigured publisher rather than an old CLI.
+      - name: Use an npm that supports trusted publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
 
       - run: npm ci
 
@@ -63,7 +72,6 @@ jobs:
       - name: Smoke test the CLI
         run: node ./dist/cli.js --version
 
+      # No token: npm exchanges the workflow's OIDC identity for publish rights.
       - name: Publish to npm
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
