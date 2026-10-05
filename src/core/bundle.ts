@@ -401,5 +401,18 @@ export function validateBundle(bundle: LoadedBundle): string[] {
     }
   }
 
+  // The same namespace problem one kind over: Copilot CLI has no commands
+  // directory outside a plugin, so a command is filed as a Skill there and the
+  // two would overwrite each other's SKILL.md.
+  for (const resource of bundle.resources) {
+    if (resource.kind !== 'command') continue;
+    const skill = seen.get(`skill:${resource.name}`);
+    if (skill) {
+      problems.push(
+        `Command "${resource.name}" collides with the skill of the same name (${skill}, ${resource.bundlePath}): Copilot CLI stores both as skills/${resource.name}/`,
+      );
+    }
+  }
+
   return problems;
 }

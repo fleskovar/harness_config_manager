@@ -2,7 +2,8 @@
 
 ## What this proves
 
-The same bundle as `claude-code-every-kind`, installed into **GitHub Copilot**:
+The same bundle as `claude-code-every-kind`, installed into **GitHub Copilot in
+the IDE** (`copilot-cli-every-kind` is the same bundle in the CLI):
 every kind lands under `.github/`, filenames grow the suffixes Copilot
 recognises, and the frontmatter goes the *opposite* way from Claude Code's on
 the two keys where the harnesses disagree.
@@ -19,8 +20,8 @@ the two keys where the harnesses disagree.
 | `inputs/case.json` | the command being run | one `install` step, `-t copilot` |
 | `inputs/bundles/sample-kit/` | the bundle | 8 files, one resource of each of the 8 kinds |
 
-Byte-for-byte the same `sample-kit` as the other four `*-every-kind` cases, on
-purpose: holding the input constant is what makes the five output trees
+Byte-for-byte the same `sample-kit` as the other five `*-every-kind` cases, on
+purpose: holding the input constant is what makes the six output trees
 directly comparable.
 
 ```bash
@@ -139,8 +140,9 @@ Merged, exactly as for Claude Code — the destination differs, the merge does n
 - **It would catch:** a suffix dropped from a filename, `tools` being joined the
   way Claude Code joins it, `applyTo` emitted as a list, a missing `type` on the
   MCP server, and a reference that forgot the `.agent.md` suffix.
-- **It does not cover:** the other four harnesses (one case each), and anything
-  about conflicts or removal.
+- **It does not cover:** the other five harnesses (one case each), and anything
+  about conflicts or removal. In particular it says nothing about Copilot CLI,
+  which reads five of these same files and is `copilot-cli-every-kind`.
 
 ## How to run and debug
 
@@ -164,6 +166,6 @@ and every one of them is explained above.
 ## When to change this case
 
 - **A red run is a regression until proven otherwise.**
-- Adding a resource kind means adding it to all five `*-every-kind` cases.
+- Adding a resource kind means adding it to all six `*-every-kind` cases.
 - **Regenerating** (`UPDATE_BASELINES=1 npm run test:cases`) is a diff a human
   reads line by line, in a commit that changes baselines and nothing else.

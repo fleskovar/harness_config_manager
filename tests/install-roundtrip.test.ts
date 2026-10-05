@@ -268,6 +268,128 @@ describe('copilot target', () => {
   });
 });
 
+describe('copilot-cli target', () => {
+  /**
+   * The bundle the other target tests use, plus a command -- the one kind
+   * Copilot CLI has no directory of its own for.
+   */
+  async function makeBundleWithCommand(name: string): Promise<string> {
+    const root = await makeBundle(name, `${name}-server`, 'Read(**)');
+    const command = path.join(root, 'commands', 'review-pr.md');
+    await fs.mkdir(path.dirname(command), { recursive: true });
+    await fs.writeFile(
+      command,
+      '---\ndescription: Review a pull request\nallowedTools: [Read, Bash]\nargumentHint: "<pr>"\n---\n\nReview PR $1.\n',
+    );
+    return root;
+  }
+
+  it('maps resources onto the repository layout the CLI reads', async () => {
+    const alpha = await makeBundleWithCommand('alpha');
+    await install(alpha, 'copilot-cli');
+
+    const agent = await readText('.github/agents/alpha-reviewer.agent.md');
+    // The agent format takes a YAML list, not Claude Code's comma-separated string.
+    expect(agent).toMatch(/tools:\s*\n\s*- Read\n\s*- Grep/);
+
+    const rule = await readText('.github/instructions/alpha-typescript.instructions.md');
+    expect(rule).toContain('applyTo: "**/*.ts"');
+
+    expect(await readText('.github/copilot-instructions.md')).toContain(
+      'Instructions from alpha.',
+    );
+    expect((await readJson('.github/copilot/settings.json')).permissions).toEqual({
+      allow: ['Read(**)'],
+    });
+  });
+
+  it('installs a command as a skill, which is how the CLI invokes one by name', async () => {
+    const alpha = await makeBundleWithCommand('alpha');
+    const record = await install(alpha, 'copilot-cli');
+
+    // There is no commands directory outside a plugin, and .github/prompts is
+    // an IDE feature the CLI does not read.
+    expect(await exists('.github/commands/review-pr.md')).toBe(false);
+    expect(await exists('.github/prompts/review-pr.prompt.md')).toBe(false);
+
+    const skill = await readText('.github/skills/review-pr/SKILL.md');
+    expect(skill).toContain('name: review-pr');
+    expect(skill).toContain('description: Review a pull request');
+    expect(skill).toMatch(/allowed-tools:\s*\n\s*- Read\n\s*- Bash/);
+    // The body is the prompt template, substitutions and all.
+    expect(skill).toContain('Review PR $1.');
+    // `argument-hint` has no field in the skill format, so it is dropped rather
+    // than written somewhere the CLI would ignore it.
+    expect(skill).not.toContain('argument-hint');
+
+    await rollback(record, projectDir);
+    expect(await exists('.github/skills/review-pr/SKILL.md')).toBe(false);
+  });
+
+  it('writes MCP servers to the file the CLI reads, not the one the IDE reads', async () => {
+    const alpha = await makeBundle('alpha', 'alpha-server', 'Read(**)');
+    const record = await install(alpha, 'copilot-cli');
+
+    expect(await exists('.vscode/mcp.json')).toBe(false);
+
+    const servers = (await readJson('.github/mcp.json')).mcpServers as Record<string, unknown>;
+    // Keyed and shaped as Claude Code's, except that `type` is spelled out --
+    // `local`, not the `stdio` the IDE uses. No `tools`: the CLI's own default
+    // is every tool.
+    expect(servers['alpha-server']).toEqual({
+      type: 'local',
+      command: 'alpha-server',
+      args: ['--serve'],
+    });
+
+    await rollback(record, projectDir);
+    expect(await exists('.github/mcp.json')).toBe(false);
+  });
+
+  it('names a remote server http rather than the IDE’s sse', async () => {
+    const alpha = await makeBundle('alpha', 'alpha-server', 'Read(**)');
+    await fs.writeFile(
+      path.join(alpha, 'mcp', 'alpha-server.json'),
+      JSON.stringify({ url: 'https://mcp.example.com/mcp', headers: { KEY: 'x' } }),
+    );
+    await install(alpha, 'copilot-cli');
+
+    const servers = (await readJson('.github/mcp.json')).mcpServers as Record<string, unknown>;
+    expect(servers['alpha-server']).toEqual({
+      type: 'http',
+      url: 'https://mcp.example.com/mcp',
+      headers: { KEY: 'x' },
+    });
+  });
+
+  it('drops the .github prefix at user scope and uses the CLI’s own filenames', async () => {
+    const alpha = await makeBundleWithCommand('alpha');
+    const copilotHome = path.join(workspace, 'copilot-home');
+    const previous = process.env.COPILOT_HOME;
+    process.env.COPILOT_HOME = copilotHome;
+
+    try {
+      const bundle = await loadBundle(alpha);
+      const plan = await buildPlan(bundle, 'copilot-cli', 'user', projectDir);
+
+      expect(plan.scopeRoot).toBe(copilotHome);
+      expect(plan.actions.map((action) => action.path).sort()).toEqual([
+        'agents/alpha-reviewer.agent.md',
+        'copilot-instructions.md',
+        // `settings.json`, not the `config.json` beside it: that one is state
+        // the CLI manages itself.
+        'instructions/alpha-typescript.instructions.md',
+        'mcp-config.json',
+        'settings.json',
+        'skills/review-pr/SKILL.md',
+      ]);
+    } finally {
+      if (previous === undefined) delete process.env.COPILOT_HOME;
+      else process.env.COPILOT_HOME = previous;
+    }
+  });
+});
+
 describe('reasonix target', () => {
   it('appends MCP servers as a marked [[plugins]] block', async () => {
     const alpha = await makeBundle('alpha', 'alpha-server', 'Read(**)');

@@ -198,7 +198,7 @@ diff -r . tests/cases/claude-code-every-kind/outputs/tree
 - **A red run is a regression until proven otherwise.** Do not regenerate the
   baseline to get green.
 - Adding a resource kind means adding it to `inputs/bundles/sample-kit/` in
-  **all five** `*-every-kind` cases, so the harnesses stay comparable:
+  **all six** `*-every-kind` cases, so the harnesses stay comparable:
   `diff -r tests/cases/claude-code-every-kind/outputs/tree tests/cases/pi-every-kind/outputs/tree`
   should only ever show things the two harnesses genuinely disagree about.
 - **Regenerating** (`UPDATE_BASELINES=1 npm run test:cases`) produces a diff a

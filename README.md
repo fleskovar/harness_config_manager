@@ -10,6 +10,7 @@ Supported targets:
 | --- | --- |
 | Claude Code | <https://code.claude.com/docs/en/claude-directory> |
 | GitHub Copilot | <https://awesome-copilot.github.com/learning-hub/copilot-configuration-basics/> |
+| GitHub Copilot CLI | <https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/overview> |
 | Reasonix | <https://github.com/esengine/DeepSeek-Reasonix/blob/main-v2/docs/GUIDE.md> |
 | OpenCode | <https://opencode.ai/docs/config/> |
 | Pi | <https://pi.dev/docs/latest/quickstart> |
@@ -100,7 +101,7 @@ version: 1.0.0
 description: What this bundle is for
 tags: [review, typescript]
 # Omit "targets" to support all of them.
-targets: [claude-code, copilot, reasonix, opencode, pi]
+targets: [claude-code, copilot, copilot-cli, reasonix, opencode, pi]
 # Bundles this one needs; installed first. See "Dependencies" below.
 dependencies:
   - jira-board@^1.2.0
@@ -129,15 +130,23 @@ harness's home directory (`hcm targets` prints the exact paths on your machine).
 | mcp | `.mcp.json` → `mcpServers.<n>` | `.vscode/mcp.json` → `servers.<n>` | `reasonix.toml` → `[[plugins]]` |
 | settings | `.claude/settings.json` | `.github/copilot/settings.json` | `reasonix.toml` |
 
-| Kind | OpenCode | Pi |
-| --- | --- | --- |
-| subagent | `.opencode/agents/<n>.md` | `.pi/skills/<n>/SKILL.md`, or `.pi/agents/<n>.md` with `--pi-subagents` |
-| skill | `.opencode/skills/<n>/` | `.pi/skills/<n>/` |
-| command | `.opencode/commands/<n>.md` | `.pi/prompts/<n>.md` |
-| rule | `.opencode/rules/<n>.md` + `opencode.json` → `instructions[]` | `AGENTS.md` |
-| context | `AGENTS.md` | `AGENTS.md` |
-| mcp | `opencode.json` → `mcp.<n>` | `.mcp.json` → `mcpServers.<n>` |
-| settings | `opencode.json` | `.pi/settings.json` |
+| Kind | GitHub Copilot CLI | OpenCode | Pi |
+| --- | --- | --- | --- |
+| subagent | `.github/agents/<n>.agent.md` | `.opencode/agents/<n>.md` | `.pi/skills/<n>/SKILL.md`, or `.pi/agents/<n>.md` with `--pi-subagents` |
+| skill | `.github/skills/<n>/` | `.opencode/skills/<n>/` | `.pi/skills/<n>/` |
+| command | `.github/skills/<n>/SKILL.md` | `.opencode/commands/<n>.md` | `.pi/prompts/<n>.md` |
+| rule | `.github/instructions/<n>.instructions.md` | `.opencode/rules/<n>.md` + `opencode.json` → `instructions[]` | `AGENTS.md` |
+| context | `.github/copilot-instructions.md` | `AGENTS.md` | `AGENTS.md` |
+| mcp | `.github/mcp.json` → `mcpServers.<n>` | `opencode.json` → `mcp.<n>` | `.mcp.json` → `mcpServers.<n>` |
+| settings | `.github/copilot/settings.json` | `opencode.json` | `.pi/settings.json` |
+
+`copilot` is Copilot in the IDE; `copilot-cli` is
+[Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli). They read
+five of the same repository files and part company on the sixth — see
+[the edges](#what-each-target-does-with-the-edges) below. At user scope the CLI
+writes into `$COPILOT_HOME`, else `~/.copilot`, without the `.github` prefix and
+with its own filenames: `mcp-config.json`, `settings.json`,
+`copilot-instructions.md`.
 
 Frontmatter is translated per target. A rule written once as:
 
@@ -145,11 +154,11 @@ Frontmatter is translated per target. A rule written once as:
 appliesTo: ["**/*.ts", "**/*.tsx"]
 ```
 
-becomes `paths: [...]` for Claude Code, `applyTo: '**/*.ts, **/*.tsx'` for
-Copilot, and — since Reasonix, OpenCode and Pi have no glob-scoped rule format —
-a line of prose above the rule text. Subagent `tools` become a comma-separated
-string for Claude Code, a YAML list for Copilot, and `allowed-tools` for
-Reasonix.
+becomes `paths: [...]` for Claude Code, `applyTo: '**/*.ts, **/*.tsx'` for both
+Copilots, and — since Reasonix, OpenCode and Pi have no glob-scoped rule format
+— a line of prose above the rule text. Subagent `tools` become a
+comma-separated string for Claude Code, a YAML list for either Copilot, and
+`allowed-tools` for Reasonix.
 
 Note the deliberate asymmetry: bundles say **subagent**, but each harness keeps
 its own word — and its own filing system — for the same thing. Claude Code,
@@ -158,8 +167,9 @@ none, because there a subagent *is* a skill — on Reasonix marked `runAs:
 subagent` and `invocation: manual` so it is only invoked by name, on Pi invoked
 as `/skill:<name>`. `hcm` translates; you only learn one vocabulary.
 
-One consequence: on Reasonix and Pi a subagent and a skill share one namespace.
-Give them distinct names — `hcm validate` flags a bundle that does not.
+One consequence: on Reasonix and Pi a subagent and a skill share one namespace,
+and on Copilot CLI a *command* and a skill do. Give them distinct names — `hcm
+validate` flags a bundle that does not.
 
 ### What each target does with the edges
 
@@ -178,21 +188,38 @@ Every target has a home for every kind, but the fit is not always exact:
   Claude Code uses — inert until an MCP extension is installed, correct once it
   is. If you *have* installed the sub-agent extension, say so — see
   [`--pi-subagents`](#pi-subagents) below.
+- **Copilot CLI has no commands directory outside a plugin.**
+  `.github/prompts/*.prompt.md` is an IDE feature the CLI does not read, and the
+  CLI's own slash commands ship inside
+  [plugins](https://docs.github.com/en/copilot/concepts/agents/about-plugins),
+  under `com.github.copilot/commands/` — a package format, not a place to
+  install one file into. So a command is filed as a skill, which the CLI loads
+  and invokes by name. `argumentHint` has no field there and is dropped;
+  `allowedTools` survives as `allowed-tools`.
 - **OpenCode has no glob-scoped rule format**, but it does read extra
   instruction files listed in `instructions`. So a rule becomes a file *and* one
   entry appended to that array — appended, never replaced, so several bundles
   can each list their own rules in the same config and each remove only its own
   on uninstall.
 
-Finally, two files are genuinely shared between harnesses rather than owned by
-one: **`.mcp.json`** (Claude Code and Pi) and **`AGENTS.md`** (OpenCode and Pi).
+Finally, some files are genuinely shared between harnesses rather than owned by
+one: **`.mcp.json`** (Claude Code and Pi), **`AGENTS.md`** (OpenCode and Pi),
+and the five repository files **both Copilots read** — `.github/agents/`,
+`.github/skills/`, `.github/instructions/`, `.github/copilot-instructions.md`
+and `.github/copilot/settings.json`. That last group is the widest overlap hcm
+has, and it is a fact about GitHub's layout rather than something to fix: the
+CLI and the IDE genuinely read the same repository. What they do not share is
+where the servers are declared — `.github/mcp.json` for the CLI,
+`.vscode/mcp.json` for the IDE — which is why they are two harnesses.
+
 Installing one bundle into both harnesses writes the shared item once, and both
 installations claim it — so uninstalling from either leaves the other working,
 and the item goes when the second one does. See
 [Shared items](#shared-items-written-once-claimed-by-everyone-who-needs-them)
 and [One folder, several harnesses](#one-folder-several-harnesses).
 
-Everything outside those two files is per-target and unaffected.
+Everything outside those files is per-target and unaffected. `hcm targets`
+prints the overlaps that apply to the folder you are standing in.
 
 ### pi-subagents
 
@@ -281,8 +308,12 @@ hcm registry add ./my-kit ./db-kit
 
 A harness can be named by its id, by an alias, or by **any unambiguous prefix**
 — `claude`, `cc`, `reason`, `op`, `oc` all work, and `-t c` is an error naming
-both Claude Code and Copilot rather than a guess. Naming the same harness twice
+Claude Code and both Copilots rather than a guess. Naming the same harness twice
 installs into it once.
+
+The two Copilots are the one pair a prefix will not separate, so each has its
+own spellings: `copilot`, `gh` and `github-copilot` are the IDE; `copilot-cli`,
+`gh-cli`, `ghcli` and `copilotcli` are the CLI.
 
 **Bundles come before `--target`.** The option is variadic, so it takes every
 value after it — `hcm install --target pi 1 2 3` reads `1 2 3` as harness names
@@ -290,7 +321,7 @@ and says so:
 
 ```
 ✖ Unknown target "1"
-  Known targets: claude-code, copilot, reasonix, opencode, pi, or "all".
+  Known targets: claude-code, copilot, copilot-cli, reasonix, opencode, pi, or "all".
   If that was meant to be a bundle, note that bundle names come before
   --target, which takes every value after it.
 ```
@@ -316,10 +347,11 @@ is already set up for ticked:
 Which harness(es) should this install into?
   [x] 1) Claude Code -- already set up in this folder
   [ ] 2) GitHub Copilot
-  [ ] 3) Reasonix
-  [ ] 4) OpenCode
-  [x] 5) Pi -- already set up in this folder
-? choose 1-5, or "all" [1,5]:
+  [ ] 3) GitHub Copilot CLI
+  [ ] 4) Reasonix
+  [ ] 5) OpenCode
+  [x] 6) Pi -- already set up in this folder
+? choose 1-6, or "all" [1,6]:
 ```
 
 Answer with numbers or names, separated by spaces or commas, `all` for every
@@ -327,7 +359,7 @@ one, or press enter to take what is ticked. What comes ticked is what hcm has
 installed here before — the ledger in `.hcm/` — and before there is one, the
 harnesses whose own directories are lying around. Only the harnesses the bundle
 supports are on the menu: a manifest with `targets: [claude-code, pi]` offers
-two lines, not five.
+two lines, not six.
 
 `-t` skips the question, and so does `--no-prompt`. Without a terminal to ask —
 a script, a CI run — an operation that would span more than one harness in a
@@ -336,7 +368,7 @@ folder set up for more than one is refused rather than guessed at:
 ```
 ✖ This folder is set up for more than one harness (Claude Code, Reasonix and Pi),
   so "hcm install my-kit" needs to be told which one to act on
-  It would otherwise affect: claude-code, copilot, reasonix, opencode, pi
+  It would otherwise affect: claude-code, copilot, copilot-cli, reasonix, opencode, pi
   Name one or more:  hcm install my-kit -t claude-code
   Or every harness:  hcm install my-kit -t all
 ```

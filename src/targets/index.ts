@@ -2,12 +2,13 @@ import { HcmError } from '../core/errors.js';
 import type { TargetId } from '../core/types.js';
 import { claudeCode } from './claude-code.js';
 import { copilot } from './copilot.js';
+import { copilotCli } from './copilot-cli.js';
 import { opencode } from './opencode.js';
 import { pi } from './pi.js';
 import { reasonix } from './reasonix.js';
 import type { Target } from './types.js';
 
-export const TARGETS: Target[] = [claudeCode, copilot, reasonix, opencode, pi];
+export const TARGETS: Target[] = [claudeCode, copilot, copilotCli, reasonix, opencode, pi];
 
 export const TARGET_IDS: TargetId[] = TARGETS.map((target) => target.id);
 
@@ -25,6 +26,13 @@ const TARGET_ALIASES: Record<string, TargetId> = {
   cc: 'claude-code',
   gh: 'copilot',
   'github-copilot': 'copilot',
+  // `copilot` and `copilot-cli` are two harnesses, so every prefix short enough
+  // to be worth typing is ambiguous between them. These are the spellings that
+  // are not: the CLI's own name, said the ways people say it.
+  ghcli: 'copilot-cli',
+  'gh-cli': 'copilot-cli',
+  copilotcli: 'copilot-cli',
+  'github-copilot-cli': 'copilot-cli',
   oc: 'opencode',
 };
 
@@ -34,8 +42,8 @@ const TARGET_ALIASES: Record<string, TargetId> = {
  * Exact ids first, then the aliases, then any unambiguous prefix -- so `-t
  * claude pi`, `-t reason op` and `-t claude-code` all say what they look like
  * they say. A prefix matching two harnesses is an error naming both rather
- * than a guess: `-t c` could be Claude Code or Copilot, and picking one would
- * write a bundle into the wrong harness.
+ * than a guess: `-t c` could be Claude Code or either Copilot, and `-t copilot-`
+ * only the CLI. Picking one would write a bundle into the wrong harness.
  */
 export function resolveTargetId(value: string): TargetId {
   const wanted = value.trim().toLowerCase();

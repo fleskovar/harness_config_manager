@@ -30,6 +30,7 @@ import { configureLogger } from '../src/core/logger.js';
 import { sharedFileNotices, sharedFiles } from '../src/core/overlap.js';
 import { readState } from '../src/core/state.js';
 import type { TargetId } from '../src/core/types.js';
+import { TARGET_IDS } from '../src/targets/index.js';
 import { exists, makeWorkspace, readJson } from './support/fixtures.js';
 
 let workspace: string;
@@ -130,6 +131,24 @@ describe('detecting the harnesses a folder is used by', () => {
       { target: 'claude-code', root: projectDir, markers: ['CLAUDE.md'], installed: false },
     ]);
   });
+
+  it('does not read a .github directory as the Copilot CLI', async () => {
+    // Copilot in the IDE reads `.github/agents` too, so finding one says which
+    // *family* the folder is set up for and not which harness -- the same
+    // reason `AGENTS.md` and `.mcp.json` are not markers either.
+    await fs.mkdir(path.join(projectDir, '.github', 'agents'), { recursive: true });
+
+    expect(await detected()).toEqual(['copilot']);
+  });
+
+  it('finds the Copilot CLI by the one project file the IDE does not read', async () => {
+    // `.github/mcp.json` is the CLI's; the IDE keeps its servers in
+    // `.vscode/mcp.json`.
+    await fs.mkdir(path.join(projectDir, '.github'), { recursive: true });
+    await fs.writeFile(path.join(projectDir, '.github', 'mcp.json'), '{}\n');
+
+    expect(await detected()).toEqual(['copilot-cli']);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -202,7 +221,7 @@ describe('the ambiguity gate', () => {
     await install(['all']);
 
     const records = (await readState('project', projectDir)).installations;
-    expect(records).toHaveLength(5);
+    expect(records).toHaveLength(TARGET_IDS.length);
   });
 
   it('says nothing in a folder used by one harness', async () => {
@@ -210,7 +229,7 @@ describe('the ambiguity gate', () => {
     await fs.mkdir(path.join(projectDir, '.claude'), { recursive: true });
     await installCommand(kit, { scope: 'project', cwd: projectDir });
 
-    expect((await readState('project', projectDir)).installations).toHaveLength(5);
+    expect((await readState('project', projectDir)).installations).toHaveLength(TARGET_IDS.length);
   });
 
   it('lets a bundle that supports one harness through untouched', async () => {
@@ -248,7 +267,7 @@ describe('the ambiguity gate', () => {
 
     try {
       await installCommand(kit, { scope: 'project', cwd: projectDir });
-      expect((await readState('project', projectDir)).installations).toHaveLength(5);
+      expect((await readState('project', projectDir)).installations).toHaveLength(TARGET_IDS.length);
     } finally {
       delete process.env.HCM_REQUIRE_TARGET;
     }
@@ -272,6 +291,7 @@ describe('the ambiguity gate', () => {
     expect(expandTargets(['all'])).toEqual([
       'claude-code',
       'copilot',
+      'copilot-cli',
       'reasonix',
       'opencode',
       'pi',
@@ -295,6 +315,51 @@ describe('the files two harnesses share', () => {
   it('finds none between harnesses that keep to themselves', () => {
     expect(sharedFiles(['claude-code', 'copilot'], 'project', projectDir)).toEqual([]);
     expect(sharedFiles(['claude-code', 'reasonix'], 'project', projectDir)).toEqual([]);
+  });
+
+  /**
+   * The widest overlap hcm has. Copilot in the IDE and Copilot CLI read the
+   * same repository directories, so installing into one is visible to the
+   * other -- which is a fact about GitHub's layout, not a thing to fix.
+   */
+  it('finds the repository files the two Copilots both read', () => {
+    const shared = sharedFiles(['copilot', 'copilot-cli'], 'project', projectDir);
+
+    expect(shared.map((file) => file.readers[0]?.path).sort()).toEqual([
+      '.github/agents/hcm-probe.agent.md',
+      '.github/copilot-instructions.md',
+      '.github/copilot/settings.json',
+      '.github/instructions/hcm-probe.instructions.md',
+      '.github/skills/hcm-probe/SKILL.md',
+    ]);
+  });
+
+  it('keeps the two Copilots’ MCP files apart', () => {
+    const shared = sharedFiles(['copilot', 'copilot-cli'], 'project', projectDir);
+    const paths = shared.flatMap((file) => file.readers.map((reader) => reader.path));
+
+    // The IDE reads `.vscode/mcp.json`, the CLI `.github/mcp.json`. Neither is
+    // shared, which is what makes them two harnesses rather than one.
+    expect(paths).not.toContain('.vscode/mcp.json');
+    expect(paths).not.toContain('.github/mcp.json');
+  });
+
+  it('says a command and a skill land in the same place on the CLI', () => {
+    const shared = sharedFiles(['copilot', 'copilot-cli'], 'project', projectDir);
+    const skill = shared.find(
+      (file) => file.readers[0]?.path === '.github/skills/hcm-probe/SKILL.md',
+    );
+
+    expect(skill?.readers).toEqual([
+      { target: 'copilot', path: '.github/skills/hcm-probe/SKILL.md', kinds: ['skill'] },
+      // The CLI has no commands directory outside a plugin, so a command is
+      // filed as a skill -- one directory, two kinds.
+      {
+        target: 'copilot-cli',
+        path: '.github/skills/hcm-probe/SKILL.md',
+        kinds: ['skill', 'command'],
+      },
+    ]);
   });
 
   it('says which kinds land in the shared file', () => {

@@ -33,8 +33,8 @@ author: ...
 homepage: ...
 tags: [review, typescript]
 targets: [claude-code, copilot]   # optional; omit to support all
-                                  # known ids: claude-code, copilot, reasonix,
-                                  #            opencode, pi
+                                  # known ids: claude-code, copilot, copilot-cli,
+                                  #            reasonix, opencode, pi
 dependencies:                     # optional; see below
   - jira-board@^1.2.0
 flavors:                          # optional; subsets, see below
@@ -362,7 +362,8 @@ You are a meticulous code reviewer...
 
 The filename is the subagent name unless frontmatter sets `name`. Write `tools` as a
 YAML list; `hcm` converts it to the comma-separated string Claude Code expects,
-leaves it a list for Copilot, and renames it `allowed-tools` for Reasonix. The
+leaves it a list for either Copilot, and renames it `allowed-tools` for
+Reasonix. The
 body becomes the system prompt.
 
 The `description` is what the harness uses to decide when to delegate, so write
@@ -433,9 +434,21 @@ Review this branch against `$ARGUMENTS`...
 ```
 
 Becomes a slash command in Claude Code, Reasonix and OpenCode, a `.prompt.md`
-file for Copilot, and a prompt template in `.pi/prompts/` for Pi. `argumentHint`
-survives everywhere that has a field for it; OpenCode has none, so it is dropped
-there.
+file for Copilot in the IDE, and a prompt template in `.pi/prompts/` for Pi.
+`argumentHint` survives everywhere that has a field for it; OpenCode has none,
+so it is dropped there.
+
+Copilot CLI is the exception, and the only harness with no home for a command at
+all. `.github/prompts/` is an IDE feature the CLI does not read, and the CLI's
+own slash commands ship inside
+[plugins](https://docs.github.com/en/copilot/concepts/agents/about-plugins),
+under `com.github.copilot/commands/` — a package format rather than a directory
+to install one file into. A skill there *is* invoked by name, so the command is
+written as a one-file skill, `.github/skills/<name>/SKILL.md`: `name` is added
+from the filename, `allowedTools` becomes `allowed-tools`, and `argumentHint` is
+dropped because nothing reads it. Commands and skills therefore share one
+namespace on that harness — do not give a command the same name as a skill in
+the same bundle, and `hcm validate` will tell you if you have.
 
 ### Rules — `rules/<name>.md`
 
@@ -451,8 +464,9 @@ appliesTo:
 ```
 
 `appliesTo` is the canonical field. It becomes `paths:` for Claude Code and
-`applyTo: '**/*.ts, **/*.tsx'` for Copilot. Omit it and the rule loads at session
-start everywhere (Copilot gets `applyTo: '**'`).
+`applyTo: '**/*.ts, **/*.tsx'` for both Copilots, which read the same
+`.github/instructions/<name>.instructions.md`. Omit it and the rule loads at
+session start everywhere (Copilot gets `applyTo: '**'`).
 
 Reasonix and Pi are the exceptions: their standing instructions are the
 `REASONIX.md` / `AGENTS.md` hierarchy, scoped by directory rather than by glob,
@@ -482,8 +496,9 @@ session, so the same brevity advice applies.
 ### Context — `context/<name>.md`
 
 Always-loaded instructions. These are merged into the harness's top-level
-instruction file (`CLAUDE.md`, `.github/copilot-instructions.md`, `REASONIX.md`,
-or `AGENTS.md` for OpenCode and Pi) inside a marker block:
+instruction file (`CLAUDE.md`, `.github/copilot-instructions.md` for either
+Copilot, `REASONIX.md`, or `AGENTS.md` for OpenCode and Pi) inside a marker
+block:
 
 ```markdown
 <!-- hcm:begin my-kit/10-conventions -->
@@ -552,15 +567,24 @@ not state a `type`, so this is enough:
 
 Each target gets the form it expects:
 
-| Canonical | Claude Code `.mcp.json` | Copilot `.vscode/mcp.json` | Reasonix `reasonix.toml` | OpenCode `opencode.json` |
-| --- | --- | --- | --- | --- |
-| `command`, `args` | as written | as written | as written | merged into one `command` argv array |
-| `env` | as written | as written | as written | `environment` |
-| `url`, `headers` | as written | as written | as written | as written |
-| *(transport)* | inferred by the harness | `type` added (`stdio`/`http`) | `type` added unless stdio, which is the documented default | `type` added (`local`/`remote`) |
-| `startupTimeoutSeconds` | as written | as written | `startup_timeout_seconds` | — |
-| `callTimeoutSeconds` | as written | as written | `call_timeout_seconds` | — |
-| `toolTimeoutSeconds` | as written | as written | `tool_timeout_seconds` | — |
+| Canonical | Claude Code `.mcp.json` | Copilot `.vscode/mcp.json` | Copilot CLI `.github/mcp.json` | Reasonix `reasonix.toml` | OpenCode `opencode.json` |
+| --- | --- | --- | --- | --- | --- |
+| `command`, `args` | as written | as written | as written | as written | merged into one `command` argv array |
+| `env` | as written | as written | as written | as written | `environment` |
+| `url`, `headers` | as written | as written | as written | as written | as written |
+| *(transport)* | inferred by the harness | `type` added (`stdio`/`http`) | `type` added (`local`/`http`) | `type` added unless stdio, which is the documented default | `type` added (`local`/`remote`) |
+| `startupTimeoutSeconds` | as written | as written | as written | `startup_timeout_seconds` | — |
+| `callTimeoutSeconds` | as written | as written | as written | `call_timeout_seconds` | — |
+| `toolTimeoutSeconds` | as written | as written | as written | `tool_timeout_seconds` | — |
+
+The two Copilots key their servers differently and read different files:
+Copilot in the IDE uses `servers` in `.vscode/mcp.json`, the CLI uses
+`mcpServers` in `.github/mcp.json` (and `~/.copilot/mcp-config.json` at user
+scope), which is the same key and shape Claude Code uses. The CLI also names the
+local transport `local` rather than `stdio`, and a remote one `http` rather than
+`sse`. Its `tools` key restricts which of a server's tools are offered; leave it
+out and the CLI offers all of them, which is why `hcm` writes nothing there
+unless the bundle asks for something narrower.
 
 OpenCode names its transports `local` and `remote` rather than `stdio` and
 `http`, and takes the command as a single argv array, so
@@ -577,11 +601,12 @@ directory, `~/.pi/agent/.mcp.json`, alongside its other resources.
 `hcm targets` prints the kinds each harness accepts; today that is all eight
 everywhere, so a bundle installs in full wherever you send it.
 
-That does mean Claude Code and Pi share `.mcp.json` at project scope, which needs
-no special handling: whichever target you install second finds the server
-already there and identical, adopts it rather than claiming it, and leaves it
-alone on uninstall. Installing a bundle into both targets and removing it from
-one keeps the other working.
+That does mean Claude Code and Pi share `.mcp.json` at project scope — and the
+two Copilots share five files under `.github/` — which needs no special
+handling: whichever target you install second finds the item already there and
+identical, adopts it rather than claiming it, and leaves it alone on uninstall.
+Installing a bundle into both targets and removing it from one keeps the other
+working. `hcm targets` lists the overlaps in the folder you are standing in.
 
 `${VAR}` references are passed through untouched — every one of these harnesses
 expands them itself, so keep secrets in the environment rather than the bundle.
@@ -631,7 +656,7 @@ Run `assets/scripts/audit.sh` first.
 Do not write where the file will end up. `hcm` works that out per target and
 rewrites the reference as it installs, because there is no single answer:
 `subagents/code-reviewer.md` becomes `.claude/agents/code-reviewer.md` on Claude
-Code, `.github/agents/code-reviewer.agent.md` on Copilot, and
+Code, `.github/agents/code-reviewer.agent.md` on either Copilot, and
 `.reasonix/skills/code-reviewer/SKILL.md` on Reasonix — where a subagent is a
 skill. A `context/` file becomes a *section of* `CLAUDE.md`, `AGENTS.md` or
 `REASONIX.md`, and references to it are pointed at that file.

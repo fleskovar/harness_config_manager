@@ -13,7 +13,13 @@
  *   files    -> path + content hash
  */
 
-export type TargetId = 'claude-code' | 'copilot' | 'reasonix' | 'opencode' | 'pi';
+export type TargetId =
+  | 'claude-code'
+  | 'copilot'
+  | 'copilot-cli'
+  | 'reasonix'
+  | 'opencode'
+  | 'pi';
 
 export type Scope = 'project' | 'user';
 

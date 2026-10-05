@@ -105,10 +105,27 @@ describe('naming a harness', () => {
     expect(resolveTargetId('PI')).toBe('pi');
   });
 
+  it('tells the two Copilots apart', () => {
+    // `copilot` is an id, so it means the IDE even though it is also a prefix
+    // of the CLI's id -- an exact name is never read as a prefix of another.
+    expect(resolveTargetId('copilot')).toBe('copilot');
+    expect(resolveTargetId('gh')).toBe('copilot');
+    expect(resolveTargetId('github-copilot')).toBe('copilot');
+
+    expect(resolveTargetId('copilot-cli')).toBe('copilot-cli');
+    expect(resolveTargetId('copilot-')).toBe('copilot-cli');
+    expect(resolveTargetId('gh-cli')).toBe('copilot-cli');
+    expect(resolveTargetId('ghcli')).toBe('copilot-cli');
+    expect(resolveTargetId('copilotcli')).toBe('copilot-cli');
+    expect(resolveTargetId('GitHub-Copilot-CLI')).toBe('copilot-cli');
+  });
+
   it('refuses a prefix that fits two harnesses rather than guessing', () => {
     // Writing a bundle into the wrong harness is worse than being asked again.
     expect(() => resolveTargetId('c')).toThrow(/matches more than one harness/);
     expect(() => resolveTargetId('c')).toThrow(/claude-code, copilot/);
+    // The two Copilots share every prefix short enough to be worth typing.
+    expect(() => resolveTargetId('cop')).toThrow(/copilot, copilot-cli/);
   });
 
   it('points at the likely mistake when the name is not a harness at all', () => {

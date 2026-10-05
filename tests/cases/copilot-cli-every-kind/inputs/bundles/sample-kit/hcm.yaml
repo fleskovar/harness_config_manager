@@ -1,0 +1,7 @@
+name: sample-kit
+version: 1.0.0
+description: "One resource of every kind, for checking what each harness makes of them."
+author: harness-config-manager
+tags:
+  - sample
+  - integration

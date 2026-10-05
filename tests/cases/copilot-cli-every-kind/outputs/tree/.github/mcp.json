@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "type": "local",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "."
+      ],
+      "env": {
+        "FS_LOG": "warn"
+      }
+    }
+  }
+}
