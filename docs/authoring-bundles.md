@@ -4,6 +4,18 @@ A practical guide to writing a bundle that installs cleanly into all three
 harnesses. See the [README](../README.md) for the CLI reference, and
 [`bundles/ts-review-kit`](../bundles/ts-review-kit) for a complete example.
 
+## Give your agent this guide
+
+The built-in `hcm` bundle contains an agent skill with the content of this
+guide. Install it into the folder where you write bundles:
+
+```bash
+hcm install hcm -t claude-code --flavor authoring
+```
+
+To ship a bundle with a CLI tool, a library, or as a separate download, see
+[Shipping a bundle with your software](shipping-bundles.md).
+
 ## Start from the scaffold
 
 ```bash

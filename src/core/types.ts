@@ -301,6 +301,11 @@ export interface RegistryEntry {
   store?: string;
   /** Registered with `--dev`: referenced in place so edits take effect at once. */
   dev?: boolean;
+  /**
+   * Ships inside the hcm package and is read from there in place. Never stored
+   * in `registry.json`, and cannot be removed. See `core/builtin.ts`.
+   */
+  builtin?: boolean;
   addedAt?: string;
   updatedAt?: string;
 }

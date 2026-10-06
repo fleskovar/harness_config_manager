@@ -19,6 +19,7 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
+    "builtin",
     "docs",
     "README.md",
     "LICENSE"
@@ -36,6 +37,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prepublishOnly": "npm run typecheck && npm run test && npm run build",
+    "version": "node scripts/sync-builtin-version.mjs && git add builtin",
     "debug:case": "node --inspect-brk --import tsx tests/run-case.ts",
     "case": "tsx tests/run-case.ts"
   },

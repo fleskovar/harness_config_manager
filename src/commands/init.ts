@@ -128,4 +128,5 @@ order to form this bundle's part of the instruction file.
 
   log.success(`Created bundle ${color.bold(name)} at ${root}`);
   log.info(color.dim(`Next: hcm registry add ${directory} && hcm info ${name}`));
+  log.info(color.dim('To give your agent the authoring guide: hcm install hcm --flavor authoring'));
 }

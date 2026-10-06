@@ -9,12 +9,13 @@ import { storeDir } from '../core/paths.js';
 import {
   addToRegistry,
   asList,
+  availableEntries,
   liveEntries,
-  readRegistry,
   removeFromRegistry,
   requireEntry,
 } from '../core/registry.js';
 import { storeEntryDir } from '../core/store.js';
+import { entryMode } from './list.js';
 import { readState } from '../core/state.js';
 import type { RegistryEntry, Scope } from '../core/types.js';
 
@@ -134,9 +135,8 @@ async function installationsOf(bundle: string, cwd: string): Promise<string[]> {
 }
 
 export async function registryListCommand(options: { json?: boolean }): Promise<void> {
-  const registry = await readRegistry();
   // Read from the working copy for dev entries -- see liveEntry in core/registry.
-  const entries = await liveEntries(registry.entries);
+  const entries = await liveEntries(await availableEntries());
 
   if (options.json) {
     log.plain(JSON.stringify(entries, null, 2));
@@ -151,7 +151,7 @@ export async function registryListCommand(options: { json?: boolean }): Promise<
   const width = Math.max(...entries.map((entry) => entry.id.length));
 
   for (const entry of entries) {
-    const mode = entry.dev ? color.yellow(' [dev]') : '';
+    const mode = entryMode(entry);
     log.plain(
       `${color.dim(entry.id.padStart(width))}  ${color.bold(entry.name)} ` +
         `${color.dim(`v${entry.version ?? '?'}`)}${mode}`,
@@ -198,7 +198,7 @@ export async function registryOpenCommand(
 /** The directory a registered bundle's files live in, dev or stored. */
 async function bundleDir(reference: string): Promise<string> {
   const entry = await requireEntry(reference);
-  if (entry.dev) return devPath(entry);
+  if (entry.dev || entry.builtin) return devPath(entry);
   if (entry.store) return storeEntryDir(entry.store);
 
   throw new HcmError(
@@ -209,7 +209,7 @@ async function bundleDir(reference: string): Promise<string> {
 
 function devPath(entry: RegistryEntry): string {
   if (entry.source.type !== 'local') {
-    throw new HcmError(`"${entry.name}" is marked dev but has no local path`);
+    throw new HcmError(`"${entry.name}" is read in place but has no local path`);
   }
   return entry.source.path;
 }

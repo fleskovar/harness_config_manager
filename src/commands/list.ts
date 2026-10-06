@@ -2,9 +2,9 @@ import { flavorNames } from '../core/flavors.js';
 import { parameterNames } from '../core/parameters.js';
 import { describeSource } from '../core/github.js';
 import { color, log } from '../core/logger.js';
-import { liveEntries, readRegistry } from '../core/registry.js';
+import { availableEntries, liveEntries } from '../core/registry.js';
 import { readState } from '../core/state.js';
-import type { InstallationRecord, Scope } from '../core/types.js';
+import type { InstallationRecord, RegistryEntry, Scope } from '../core/types.js';
 
 export interface ListOptions {
   installed?: boolean;
@@ -20,10 +20,9 @@ export async function listCommand(options: ListOptions): Promise<void> {
 }
 
 async function listAvailable(options: ListOptions): Promise<void> {
-  const registry = await readRegistry();
   // A dev entry is a pointer at a working copy, not a copy of it, so what it
   // offers today is in its manifest rather than in the registry. See liveEntry.
-  const entries = await liveEntries(registry.entries);
+  const entries = await liveEntries(await availableEntries());
 
   // Mark which registered bundles are installed somewhere, so one listing answers
   // both "what can I install?" and "what is already here?".
@@ -56,7 +55,7 @@ async function listAvailable(options: ListOptions): Promise<void> {
   for (const entry of entries) {
     const marker = installed.has(entry.name) ? color.green('●') : color.dim('○');
     const version = entry.version ? color.dim(` v${entry.version}`) : '';
-    const mode = entry.dev ? color.yellow(' [dev]') : '';
+    const mode = entryMode(entry);
     log.plain(
       `${marker} ${color.dim(entry.id.padStart(idWidth))}  ` +
         `${color.bold(entry.name.padEnd(nameWidth))}${version}${mode}`,
@@ -76,6 +75,12 @@ async function listAvailable(options: ListOptions): Promise<void> {
       log.plain(`${indent}${color.dim(`parameters: ${parameterNames(entry.parameters)}`)}`);
     }
   }
+}
+
+/** How an entry is read: `[dev]` from a working copy, `[built-in]` from hcm itself. */
+export function entryMode(entry: RegistryEntry): string {
+  if (entry.builtin) return color.cyan(' [built-in]');
+  return entry.dev ? color.yellow(' [dev]') : '';
 }
 
 async function listInstalled(options: ListOptions): Promise<void> {

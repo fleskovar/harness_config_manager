@@ -9,6 +9,13 @@
 
 import path from 'node:path';
 import { discoverBundleDirs, loadBundle } from './bundle.js';
+import {
+  BUILTIN_BUNDLES,
+  builtinDir,
+  findBuiltin,
+  isBuiltinName,
+  isReservedId,
+} from './builtin.js';
 import { HcmError } from './errors.js';
 import { summarizeFlavors } from './flavors.js';
 import { summarizeParameters } from './parameters.js';
@@ -21,23 +28,30 @@ import type { BundleSource, LoadedBundle, RegistryEntry, RegistryFile } from './
 /**
  * The smallest id not already taken, in base 36: 1-9, then a-z, then 10, 11...
  * Reusing ids freed by `registry remove` keeps them short, which is the whole
- * point of having them.
+ * point of having them. `0` belongs to the built-in bundle -- see `builtin.ts`
+ * -- which is why counting starts at 1.
  */
 export function nextRegistryId(taken: Iterable<string>): string {
   const used = new Set(taken);
-  for (let n = 1; ; n += 1) {
+  for (let n = 0; ; n += 1) {
     const candidate = n.toString(36);
-    if (!used.has(candidate)) return candidate;
+    if (!used.has(candidate) && !isReservedId(candidate)) return candidate;
   }
 }
 
-/** Give ids to entries written before ids existed, in registry order. */
+/**
+ * Give ids to entries written before ids existed, and new ones to entries
+ * holding a reserved id -- a hand-edited file, or one written before the id
+ * was reserved -- in registry order.
+ */
 function backfillIds(entries: RegistryEntry[]): boolean {
-  const taken = new Set(entries.map((entry) => entry.id).filter(Boolean));
+  const taken = new Set(
+    entries.map((entry) => entry.id).filter((id) => id && !isReservedId(id)),
+  );
   let changed = false;
 
   for (const entry of entries) {
-    if (entry.id) continue;
+    if (entry.id && !isReservedId(entry.id)) continue;
     entry.id = nextRegistryId(taken);
     taken.add(entry.id);
     changed = true;
@@ -68,6 +82,12 @@ export async function writeRegistry(registry: RegistryFile): Promise<void> {
 export function matchEntry(entries: RegistryEntry[], reference: string): RegistryEntry | undefined {
   const wanted = reference.trim();
 
+  // A reserved id means the built-in bundle and nothing else, even ahead of a
+  // name match -- a bundle called "0" in a hand-edited registry included.
+  if (isReservedId(wanted)) {
+    return entries.find((entry) => entry.builtin && entry.id === wanted.toLowerCase());
+  }
+
   const byName = entries.find((entry) => entry.name === wanted);
   if (byName) return byName;
 
@@ -82,16 +102,61 @@ export function matchEntry(entries: RegistryEntry[], reference: string): Registr
 
 /** Resolve a reference to a registry entry, or fail with the known ids listed. */
 export async function requireEntry(reference: string): Promise<RegistryEntry> {
-  const registry = await readRegistry();
-  const entry = matchEntry(registry.entries, reference);
+  const entries = await availableEntries();
+  const entry = matchEntry(entries, reference);
   if (entry) return entry;
 
   throw new HcmError(
     `"${reference}" is not a registered bundle`,
-    registry.entries.length > 0
-      ? `Registered: ${registry.entries.map((known) => `${known.id} ${known.name}`).join(', ')}`
+    entries.length > 0
+      ? `Registered: ${entries.map((known) => `${known.id} ${known.name}`).join(', ')}`
       : 'Nothing is registered yet. Try "hcm registry add <path-or-repo>".',
   );
+}
+
+// ---------------------------------------------------------------------------
+// Built-in bundles
+// ---------------------------------------------------------------------------
+
+/**
+ * The bundles that ship with hcm, as registry entries. See `builtin.ts`.
+ *
+ * Built on every call rather than stored, so the path and the metadata are
+ * always those of the package that is running. A built-in bundle missing from
+ * the package -- a broken install -- is left out rather than failing every
+ * command that lists bundles.
+ */
+async function builtinEntries(): Promise<RegistryEntry[]> {
+  const entries: RegistryEntry[] = [];
+
+  for (const builtin of BUILTIN_BUNDLES) {
+    const source: BundleSource = { type: 'local', path: builtinDir(builtin) };
+    try {
+      const bundle = await loadBundle(source.path, source);
+      entries.push({
+        id: builtin.id,
+        name: builtin.name,
+        source,
+        ...bundleMetadata(bundle),
+        builtin: true,
+      });
+    } catch {
+      continue;
+    }
+  }
+
+  return entries;
+}
+
+/**
+ * Every bundle that can be installed by name or id: the built-in ones first,
+ * then the registered ones.
+ *
+ * This is what lookups read. `readRegistry` stays the file and nothing more, so
+ * code that writes the registry back can never persist a built-in entry.
+ */
+export async function availableEntries(): Promise<RegistryEntry[]> {
+  return [...(await builtinEntries()), ...(await readRegistry()).entries];
 }
 
 /**
@@ -105,6 +170,17 @@ export async function entryDir(
   entry: RegistryEntry,
   options: { refresh?: boolean } = {},
 ): Promise<string> {
+  if (entry.builtin) {
+    const shipped = entry.source.type === 'local' ? entry.source.path : undefined;
+    if (!shipped || !(await isDirectory(shipped))) {
+      throw new HcmError(
+        `The built-in bundle "${entry.name}" is missing from this hcm installation`,
+        'Reinstall hcm: npm install -g harness-config-manager',
+      );
+    }
+    return shipped;
+  }
+
   if (entry.dev) {
     const working = entry.source.type === 'local' ? entry.source.path : undefined;
     if (!working || !(await isDirectory(working))) {
@@ -274,6 +350,18 @@ export async function addToRegistry(
 
   for (const bundle of bundles) {
     const name = options.name ?? bundle.manifest.name;
+    if (isBuiltinName(name)) {
+      throw new HcmError(
+        `"${name}" is the name of a bundle built into hcm`,
+        'Register this one under another name with --name <name>.',
+      );
+    }
+    if (isReservedId(name)) {
+      throw new HcmError(
+        `"${name}" is reserved as the id of the built-in hcm bundle`,
+        'Register this one under another name with --name <name>.',
+      );
+    }
     const existing = registry.entries.find((candidate) => candidate.name === name);
 
     // Re-registering keeps the id, so anything you have written down still works.
@@ -309,7 +397,16 @@ export async function removeFromRegistry(
 ): Promise<{ entry: RegistryEntry; storeRemoved: boolean } | undefined> {
   const registry = await readRegistry();
   const entry = matchEntry(registry.entries, reference);
-  if (!entry) return undefined;
+  if (!entry) {
+    const builtin = findBuiltin(reference);
+    if (builtin) {
+      throw new HcmError(
+        `"${builtin.name}" is built into hcm and cannot be removed`,
+        `To take it out of a project, run "hcm uninstall ${builtin.name}" there.`,
+      );
+    }
+    return undefined;
+  }
 
   registry.entries = registry.entries.filter((candidate) => candidate !== entry);
   await writeRegistry(registry);
@@ -330,6 +427,13 @@ export async function refreshEntry(
   entry: RegistryEntry,
   options: { dryRun?: boolean } = {},
 ): Promise<{ entry: RegistryEntry; bundle: LoadedBundle; previousVersion?: string }> {
+  // Already read in place from the package that is running; there is no
+  // origin to go back to and no registry entry to write.
+  if (entry.builtin) {
+    const bundle = await loadBundle(await entryDir(entry), entry.source);
+    return { entry, bundle, previousVersion: entry.version };
+  }
+
   if (entry.dev) {
     const bundle = await loadBundle(await entryDir(entry), entry.source);
     return options.dryRun
@@ -390,8 +494,8 @@ export async function resolveBundles(
   cwd: string,
   options: { refresh?: boolean } = {},
 ): Promise<LoadedBundle[]> {
-  const registry = await readRegistry();
-  const entry = matchEntry(registry.entries, reference);
+  const entries = await availableEntries();
+  const entry = matchEntry(entries, reference);
   if (entry) return [await loadBundle(await entryDir(entry, options), entry.source)];
 
   const source = parseSource(reference, cwd);
@@ -404,8 +508,8 @@ export async function resolveBundles(
     // "this skill has no SKILL.md" -- and only supply a hint when the error
     // did not carry one of its own.
     const fallbackHint =
-      registry.entries.length > 0
-        ? `Registered bundles: ${registry.entries.map((candidate) => `${candidate.id} ${candidate.name}`).join(', ')}`
+      entries.length > 0
+        ? `Registered bundles: ${entries.map((candidate) => `${candidate.id} ${candidate.name}`).join(', ')}`
         : 'No bundles are registered yet. Try "hcm registry add <path-or-repo>".';
 
     throw new HcmError(error.message, error.hint ?? fallbackHint);
@@ -435,6 +539,5 @@ export async function resolveBundle(
  * installed without ever having been registered.
  */
 export async function resolveInstalledName(reference: string): Promise<string> {
-  const registry = await readRegistry();
-  return matchEntry(registry.entries, reference)?.name ?? reference;
+  return matchEntry(await availableEntries(), reference)?.name ?? reference;
 }

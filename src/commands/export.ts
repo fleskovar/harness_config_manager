@@ -3,9 +3,12 @@
  *
  * Only GitHub-backed bundles are exported: a local path means nothing on
  * another machine, so those are reported as skipped rather than written out.
+ * The one exception is a bundle built into hcm, which every machine with hcm
+ * has, and which is written by name.
  */
 
 import path from 'node:path';
+import { isBuiltinName } from '../core/builtin.js';
 import { describeSource } from '../core/github.js';
 import { color, log } from '../core/logger.js';
 import { readRegistry } from '../core/registry.js';
@@ -131,7 +134,7 @@ async function collectFromState(options: ExportOptions): Promise<Collected> {
   }
 
   for (const [name, info] of seen) {
-    const reference = sourceToReference(info.source);
+    const reference = isBuiltinName(name) ? name : sourceToReference(info.source);
     if (!reference) {
       skipped.push({ name, location: describeSource(info.source) });
       continue;

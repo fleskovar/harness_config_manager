@@ -122,6 +122,19 @@ async function capture(run: () => Promise<void>): Promise<string> {
 
 const list = (): Promise<string> => capture(() => listCommand({ cwd: projectDir }));
 
+/**
+ * The lines a listing printed for one bundle: its own line and the indented
+ * ones under it. The built-in bundle is listed too, with flavors of its own.
+ */
+function linesFor(printed: string, name: string): string {
+  const lines = printed.split('\n');
+  const start = lines.findIndex((line) => line.includes(name));
+  if (start < 0) return '';
+  // The lines under an entry are indented; the next entry's line is not.
+  const end = lines.findIndex((line, index) => index > start && !/^\s{2,}/.test(line));
+  return lines.slice(start, end < 0 ? undefined : end).join('\n');
+}
+
 // ---------------------------------------------------------------------------
 
 describe('a dev bundle that has grown since it was registered', () => {
@@ -151,10 +164,15 @@ describe('a dev bundle that has grown since it was registered', () => {
 
   it('says the same in "hcm list --json", which is what scripts read', async () => {
     const printed = await capture(() => listCommand({ json: true, cwd: projectDir }));
-    const entries = JSON.parse(printed) as { version: string; flavors?: { name: string }[] }[];
+    const entries = JSON.parse(printed) as {
+      name: string;
+      version: string;
+      flavors?: { name: string }[];
+    }[];
+    const entry = entries.find((candidate) => candidate.name === 'coding-kit');
 
-    expect(entries[0]?.version).toBe('1.1.0');
-    expect(entries[0]?.flavors?.map((flavor) => flavor.name)).toEqual(['python', 'csharp']);
+    expect(entry?.version).toBe('1.1.0');
+    expect(entry?.flavors?.map((flavor) => flavor.name)).toEqual(['python', 'csharp']);
   });
 
   it('stops advertising a flavor the manifest has dropped', async () => {
@@ -163,7 +181,7 @@ describe('a dev bundle that has grown since it was registered', () => {
       'name: coding-kit\nversion: 1.2.0\ndescription: Back to one language\n',
     );
 
-    const printed = await list();
+    const printed = linesFor(await list(), 'coding-kit');
     expect(printed).toMatch(/v1\.2\.0/);
     expect(printed).not.toMatch(/flavors:/);
     expect(printed).not.toMatch(/parameters:/);

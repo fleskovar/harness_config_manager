@@ -34,6 +34,10 @@ Note the package name is the full `harness-config-manager`, not `hcm`. `npx`
 resolves the *package* name, and `hcm` on npm is an unrelated package. Once
 installed, the command itself is `hcm`.
 
+Each installation includes the built-in `hcm` bundle. It gives an agent the
+skills to use hcm, to write bundles, and to connect a CLI tool to hcm. See
+[The built-in `hcm` bundle](#the-built-in-hcm-bundle).
+
 ### From source
 
 For working on hcm itself. `make setup` checks your Node version first and
@@ -49,6 +53,7 @@ Or without make: `npm ci && npm run build && npm link`.
 ## Quick start
 
 ```bash
+hcm install hcm -t claude       # give your agent the hcm skills (built in)
 hcm init my-kit                  # scaffold a bundle
 hcm registry add ./my-kit        # make it installable by name or id
 hcm list                         # what can I install?
@@ -71,6 +76,70 @@ you mean. See [One folder, several harnesses](#one-folder-several-harnesses).
 Every registered bundle also gets a one-character id, so the above is usually
 `hcm install 1`, `hcm update 1`. If you are *writing* the bundle, register it
 with `hcm registry add ./my-kit --dev` and your edits apply straight away.
+
+## The built-in `hcm` bundle
+
+The hcm package contains one bundle, `hcm`, with the id `0`. You do not
+register it. `hcm list` shows it with the mark `[built-in]`.
+
+| Resource | Flavor | Use |
+| --- | --- | --- |
+| `context/10-hcm.md` | common | Tells the agent that hcm manages the agent configuration of the project. |
+| `skills/hcm-usage/` | common | Find, install, update and remove bundles. |
+| `skills/hcm-bundle-authoring/` | `authoring` | Write, check and publish a bundle. |
+| `skills/hcm-integration/` | `integration` | Ship a bundle with a CLI tool (`my-cli hcm init`), with a library (`python -m my_library.hcm init`, `npx --no my-lib-hcm init`), or as a separate download. |
+
+To add hcm support to a project, install the bundle there:
+
+```bash
+hcm install hcm -t claude-code                       # all of it
+hcm install hcm -t claude-code --flavor authoring    # only the common part and the authoring skill
+hcm install hcm -t claude-code -s user               # for all projects of this user
+```
+
+hcm reads this bundle from its own package. It does not copy the bundle into
+the store, and it does not write it to `registry.json`. Thus the bundle always
+has the version of the hcm that runs. After you upgrade hcm, run `hcm update` in
+each project that has the bundle.
+
+The id `0` is reserved for this bundle. hcm never gives it to a registered
+bundle, and `hcm install 0` always means the built-in bundle. If a registry file
+gives `0` to a registered bundle, hcm gives that bundle a new id when it reads
+the file. A registered bundle cannot have the name `0`.
+
+The name `hcm` is reserved too. `hcm registry add` refuses a different bundle with
+that name, unless you give it a different name with `--name`. `hcm registry
+remove hcm` also fails: to remove the bundle from a project, use `hcm uninstall
+hcm`. `hcm export` writes the bundle as `hcm`, and `hcm import` installs it with
+no registration. Another bundle can require it in `dependencies`.
+
+The source is [`builtin/hcm/`](builtin/hcm/). `npm version` copies the package
+version into its `hcm.yaml`, through `scripts/sync-builtin-version.mjs`.
+
+## Ship a bundle with your software
+
+A CLI tool, an app or a library can ship agent configuration as an hcm bundle.
+There are three strategies:
+
+```bash
+my-cli hcm init                      # a CLI tool: its subcommand registers the bundle
+python -m my_library.hcm init        # a library: an entry point of the package does the same
+npx --no my-lib-hcm init
+hcm registry add owner/repo/hcm-bundle#v1.2.0   # any software: download only the bundle folder
+```
+
+After the registration, `hcm install my-cli -t claude` installs the bundle like
+any other. A `--dev` option registers the working copy in place, so that
+`hcm update` in each test project picks up each edit.
+
+[Shipping a bundle with your software](docs/shipping-bundles.md) describes the
+strategies. The `hcm-integration` skill of the built-in bundle contains the same
+procedures, with code for Node.js, Python and Go. Install it, and an agent can
+write the integration for you:
+
+```bash
+hcm install hcm -t claude-code --flavor integration authoring
+```
 
 ## Bundle layout
 
@@ -1235,7 +1304,8 @@ hcm registry remove 1
 
 Ids are assigned on registration and stay put; re-registering a bundle keeps
 its id, and an id freed by `registry remove` is handed to the next bundle
-registered. They are a local convenience, not an identity: `bundles.txt` and
+registered. The id `0` is reserved for [the built-in `hcm`
+bundle](#the-built-in-hcm-bundle), so registered ids start at `1`. They are a local convenience, not an identity: `bundles.txt` and
 install receipts always record names and sources, so nothing that travels
 between machines depends on them.
 
@@ -1512,7 +1582,9 @@ src/
 │                       # refmap.ts -- repointing them at the installed layout
 ├── merge/              # json-merge.ts, blocks.ts, toml.ts -- the receipt machinery
 └── targets/            # one adapter per harness
+builtin/hcm/            # the built-in bundle, shipped in the npm package
 bundles/ts-review-kit/  # sample bundle exercising every resource kind
+scripts/                # sync-builtin-version.mjs, run by "npm version"
 tests/
 ├── *.test.ts           # the unit layer: pure functions, plans, refusals,
 │                       #   registry ids, and anything whose assertion is not

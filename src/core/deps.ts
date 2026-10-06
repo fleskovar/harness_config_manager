@@ -26,7 +26,7 @@ import { discoverBundleDirs, loadBundle, loadManifest } from './bundle.js';
 import { HcmError } from './errors.js';
 import { isDirectory } from './fsx.js';
 import { describeSource, resolveSource } from './github.js';
-import { entryDir, loadBundlesFrom, parseSource, readRegistry } from './registry.js';
+import { availableEntries, entryDir, loadBundlesFrom, parseSource } from './registry.js';
 import { satisfies } from './semver.js';
 import type { BundleDependency, BundleSource, InstalledDependency, LoadedBundle } from './types.js';
 
@@ -226,9 +226,11 @@ async function fromRegistry(
   _cwd: string,
   options: ResolveOptions,
 ): Promise<Candidate | undefined> {
-  const registry = await readRegistry();
   // By name only: an id is a local handle, not something a manifest can mean.
-  const entry = registry.entries.find((candidate) => candidate.name === dependency.name);
+  // Built-in bundles count, so a bundle can require "hcm" on any machine.
+  const entry = (await availableEntries()).find(
+    (candidate) => candidate.name === dependency.name,
+  );
   if (!entry) return undefined;
 
   const bundle = await loadBundle(await entryDir(entry, options), entry.source);

@@ -33,7 +33,8 @@ import {
   parseAssignments,
   readParametersFile,
 } from '../core/parameters.js';
-import { asList, entryDir, readRegistry, refreshEntry, requireEntry } from '../core/registry.js';
+import { asList, availableEntries, entryDir, refreshEntry, requireEntry } from '../core/registry.js';
+import { entryMode } from './list.js';
 import { findInstallation, readState } from '../core/state.js';
 import type {
   InstallationRecord,
@@ -189,13 +190,13 @@ async function select(
   references: string[] | undefined,
   options: UpdateOptions,
 ): Promise<Selection> {
-  const registry = await readRegistry();
+  const available = await availableEntries();
 
   if (references !== undefined && references.length > 0) {
     const selected = new Map<string, RegistryEntry>();
 
     for (const reference of references) {
-      const named = registry.entries.find(
+      const named = available.find(
         (entry) => entry.name === reference || entry.id === reference,
       );
       if (named) {
@@ -203,14 +204,14 @@ async function select(
         continue;
       }
       if (reference === 'all') {
-        for (const entry of registry.entries) selected.set(entry.id, entry);
+        for (const entry of available) selected.set(entry.id, entry);
         continue;
       }
       const found = await requireEntry(reference);
       selected.set(found.id, found);
     }
 
-    const entries = registry.entries.filter((entry) => selected.has(entry.id));
+    const entries = available.filter((entry) => selected.has(entry.id));
     return { entries, unregistered: [], fromLedger: false };
   }
 
@@ -218,13 +219,13 @@ async function select(
 
   // Registry order, not ledger order, so `hcm update` and `hcm update all`
   // walk the same bundles in the same sequence.
-  const entries = registry.entries.filter((entry) => installed.has(entry.name));
+  const entries = available.filter((entry) => installed.has(entry.name));
   const claimed = new Set(entries.map((entry) => entry.name));
 
-  for (const entry of await aliasedEntries(registry.entries, installed, claimed)) {
+  for (const entry of await aliasedEntries(available, installed, claimed)) {
     entries.push(entry);
   }
-  entries.sort((a, b) => registry.entries.indexOf(a) - registry.entries.indexOf(b));
+  entries.sort((a, b) => available.indexOf(a) - available.indexOf(b));
 
   const unregistered = [...installed].filter((name) => !claimed.has(name)).sort();
   return { entries, unregistered, fromLedger: true };
@@ -319,7 +320,7 @@ async function updateOne(entry: RegistryEntry, options: UpdateOptions): Promise<
 
   log.info(
     `${color.dim(`[${updated.id}]`)} ${color.bold(updated.name)} ${version}` +
-      (updated.dev ? color.yellow(' [dev]') : ''),
+      entryMode(updated),
   );
 
   // A `--flavor` this bundle does not have is refused here rather than left to

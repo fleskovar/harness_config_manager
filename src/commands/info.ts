@@ -15,7 +15,7 @@ import {
   withDefaults,
 } from '../core/parameters.js';
 import { buildPlan } from '../core/planner.js';
-import { asList, readRegistry, resolveBundles } from '../core/registry.js';
+import { asList, availableEntries, resolveBundles } from '../core/registry.js';
 import type {
   LoadedBundle,
   ParameterValues,
@@ -58,7 +58,7 @@ export async function infoCommand(
   options = { ...options, flavors: expandFlavors(options.flavors) ?? [] };
   assertFlavorsAvailable(bundles, options.flavors as string[]);
 
-  const registry = await readRegistry();
+  const entries = await availableEntries();
 
   const fromFiles = [];
   for (const file of options.paramsFiles ?? []) {
@@ -68,7 +68,7 @@ export async function infoCommand(
 
   for (const [index, bundle] of bundles.entries()) {
     if (index > 0) log.plain(color.dim('\n' + '─'.repeat(60)));
-    const entry = registry.entries.find((candidate) => candidate.name === bundle.manifest.name);
+    const entry = entries.find((candidate) => candidate.name === bundle.manifest.name);
     await describeBundle(bundle, options, entry?.id, overrides);
   }
 }

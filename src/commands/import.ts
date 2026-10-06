@@ -5,6 +5,7 @@
 
 import path from 'node:path';
 import type { ConflictPolicy, Resolution } from '../core/conflicts.js';
+import { findBuiltin } from '../core/builtin.js';
 import { HcmError } from '../core/errors.js';
 import { readTextIfExists } from '../core/fsx.js';
 import { color, log } from '../core/logger.js';
@@ -66,6 +67,14 @@ export async function importCommand(file: string | undefined, options: ImportOpt
   const failed: { reference: string; reason: string }[] = [];
 
   for (const reference of references) {
+    // Built into hcm, so there is nothing to register -- only to install.
+    const builtin = findBuiltin(reference);
+    if (builtin) {
+      registered.push(builtin.name);
+      log.success(`  ${color.bold(builtin.name)} is built into hcm`);
+      continue;
+    }
+
     try {
       const entries = await addToRegistry(reference, options.cwd);
       for (const entry of entries) {
