@@ -1258,7 +1258,8 @@ hcm install my-kit --on-conflict prompt     # ask even where hcm would not have
 | `hcm validate [dir]` | Check a bundle for common mistakes |
 | `hcm init [dir]` | Scaffold a new bundle |
 | `hcm targets` | Supported harnesses, their paths, which are set up here, and the files they share |
-| `hcm registry add <source...>` | Register bundles by path, `owner/repo`, or GitHub URL. `--dev`, `-n/--name` (one source only) |
+| `hcm registry add <source...>` | Register bundles by path, `owner/repo`, GitHub URL, or the HTTPS clone URL of any git host. `--dev`, `-n/--name` (one source only) |
+| `hcm registry update [bundle...]` | Read registered bundles from their sources again, and replace the stored copies. No argument: all of them. `--dry-run` |
 | `hcm registry remove <bundle...>` | Unregister and delete the stored copy |
 | `hcm registry open [bundle]` | Print — and open — where registered bundles are stored |
 | `hcm registry list` | List registered bundles with their ids |
@@ -1284,8 +1285,9 @@ scoped to a bundle (`my-kit:NAME=value`) or to a bundle in one harness
 variadic, so it never swallows the bundle names after it. See
 [Parameters](#parameters-values-filled-in-at-install-time).
 
-`<bundle>` accepts a registered **name or id**, a local path, or a GitHub
-reference — so `hcm install 3`, `hcm install ./my-kit` and
+`<bundle>` accepts a registered **name or id**, a local path, a GitHub
+reference, or the [clone URL of any git host](#other-git-hosts-azure-devops-bitbucket-gitlab)
+— so `hcm install 3`, `hcm install ./my-kit` and
 `hcm install acme/kits/review#v2` all work, the last two without registering
 first.
 
@@ -1354,6 +1356,60 @@ the ref, so for a branch name containing a slash use the shorthand instead:
 Tarballs are cached under `~/.hcm/cache`; `--refresh` re-downloads. See
 [Settings](#settings) to put the cache somewhere else.
 
+### Other git hosts: Azure DevOps, Bitbucket, GitLab
+
+`hcm` reads a bundle from any git host that has an HTTPS clone URL: Azure
+DevOps, Bitbucket, GitLab, Gitea or a self-hosted server. Give the URL that you
+give to `git clone`:
+
+```bash
+hcm registry add https://dev.azure.com/org/project/_git/repo
+hcm registry add https://bitbucket.org/workspace/repo.git
+hcm registry add https://gitlab.com/group/subgroup/repo.git
+hcm registry add https://git.example.com/team/repo.git
+```
+
+`hcm` does not start `git`, so the machine does not need git. It uses the git
+protocol over HTTPS, and downloads the files of one commit without the history.
+
+To select a ref, a folder, or both, add `#<ref>:<folder>` to the URL. This is
+the form of `git show <ref>:<path>`:
+
+```bash
+hcm registry add https://bitbucket.org/workspace/repo.git#v1.2.0            # a tag, a branch or a full commit id
+hcm registry add https://bitbucket.org/workspace/repo.git#main:bundles      # a folder of a branch
+hcm registry add https://bitbucket.org/workspace/repo.git#:bundles/my-kit   # a folder of the default branch
+```
+
+- Without a ref, `hcm` reads the default branch.
+- A branch is not a fixed version. `hcm registry update` downloads its latest commit.
+- `hcm` also reads the browser URL of an Azure DevOps folder, with its `path` and `version` parameters.
+- To read a GitHub repository with the git protocol, write `git+` before the URL: `git+https://github.com/owner/repo.git`. Use this form for a private GitHub repository.
+- An SSH URL works only for github.com. For each other host, use the HTTPS clone URL.
+- `hcm` does not write symbolic links or submodules.
+
+#### Private repositories
+
+Put an access token in an environment variable. `hcm` sends the token as the
+password of HTTP Basic authentication.
+
+| Variable | Meaning |
+| --- | --- |
+| `HCM_GIT_TOKEN_<HOST>` | The token for one host. Write the host name in upper case, with `_` for each character that is not a letter or a digit: `HCM_GIT_TOKEN_DEV_AZURE_COM` |
+| `HCM_GIT_TOKEN` | The token for each host that has no variable of its own |
+| `HCM_GIT_USERNAME` | The user name, for a host that needs one. A user name in the URL has priority |
+
+```bash
+export HCM_GIT_TOKEN_DEV_AZURE_COM=<token>          # PowerShell: $env:HCM_GIT_TOKEN_DEV_AZURE_COM = '<token>'
+hcm registry add https://dev.azure.com/org/project/_git/repo
+```
+
+- The token needs only read access to the code.
+- Do not put the token in the URL. `hcm` records the URL in its registry, so it refuses a URL that contains a password.
+- Use `HCM_GIT_TOKEN_<HOST>` when you use more than one host. Then each host gets only its own token.
+- Azure DevOps, GitHub and GitLab accept a token with any user name.
+- For a Bitbucket access token, `hcm` sends the user name `x-token-auth`. For a Bitbucket app password, keep your user name in the URL: `https://<user>@bitbucket.org/workspace/repo.git`.
+
 ### The store: where registered bundles live
 
 Registering **copies** the bundle into one central directory, `~/.hcm/store`,
@@ -1372,9 +1428,9 @@ hcm registry open --no-open # print only
 ```
 
 So a registered bundle is a **snapshot**. Installing it today and again next
-month installs the same thing both times, whether it came from a GitHub ref that
-has since moved or a working directory you have been editing. `hcm update` is
-what goes back to the source; nothing else does.
+month installs the same thing both times, whether it came from a remote ref that
+has since moved or a working directory you have been editing. `hcm update` and
+`hcm registry update` are what go back to the source; nothing else does.
 
 ### Authoring: `registry add --dev`
 
@@ -1393,7 +1449,7 @@ them without touching your files. The listings read them live too: add a flavor
 or a parameter to `my-kit/hcm.yaml` and `hcm list` says so at once, with no
 `hcm update` in between. A registered *snapshot* is the other way round — `hcm
 list` describes the copy in the store, which is what an install would write,
-until `hcm update` moves it. `--dev` is refused for GitHub sources: there
+until `hcm update` moves it. `--dev` is refused for remote sources: there
 is nothing to edit in place. Clone the repo and register the clone.
 
 ### Updating
@@ -1422,6 +1478,23 @@ Anything installed here that is *not* registered — a bundle installed straight
 from a path — is named and skipped, because there is nowhere to re-read it from.
 Register its source and it joins the next run.
 
+**`hcm registry update` does only the first half.** It reads registered bundles
+from their sources again and replaces the stored copies. It does not change a
+project:
+
+```bash
+hcm registry update             # every registered bundle
+hcm registry update my-kit 3    # only these bundles
+hcm registry update --dry-run   # show the versions, and change nothing
+```
+
+Use it to get the latest version of the bundles of a remote repository. Then run
+`hcm update` in each project that has them.
+
+- `hcm` downloads a repository one time, also when it holds many registered bundles.
+- If one source fails, `hcm` reports it, updates the other bundles, and exits with code 1.
+- A bundle that is new in the repository is not registered. Run `hcm registry add <url>` again to register it.
+
 It is a rollback followed by an install, not a write-over-the-top, because a new
 version is defined as much by what it *removed*: a subagent deleted upstream has
 to disappear from the harness too. Items you hand-edited since installing still
@@ -1449,9 +1522,9 @@ files.
 
 ### Collections: many bundles in one place
 
-A directory — local or a GitHub repo — can hold several bundles side by side.
-Anything whose immediate subdirectories each contain an `hcm.yaml` is treated as
-a collection:
+A directory — local, a GitHub repo, or a repo on any other git host — can hold
+several bundles side by side. Anything whose immediate subdirectories each
+contain an `hcm.yaml` is treated as a collection:
 
 ```
 agent-kits/
@@ -1467,6 +1540,7 @@ Point any command at the collection and it acts on every bundle inside:
 ```bash
 hcm registry add ./agent-kits        # registers review-kit and db-kit separately
 hcm registry add acme/agent-kits     # same, straight from GitHub
+hcm registry add https://dev.azure.com/acme/platform/_git/agent-kits   # same, from Azure DevOps
 hcm install ./agent-kits             # installs both
 hcm info acme/agent-kits             # describes both
 ```
@@ -1492,7 +1566,7 @@ hcm config unset cacheDir                   # back to the default
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `cacheDir` | `~/.hcm/cache` | Where bundles downloaded from GitHub are stored |
+| `cacheDir` | `~/.hcm/cache` | Where bundles downloaded from GitHub and other git hosts are stored |
 | `storeDir` | `~/.hcm/store` | Where registered bundles themselves are kept |
 | `requireTarget` | `auto` | When a writing command insists on `-t`: `auto` in [multi-harness folders](#one-folder-several-harnesses), `always`, or `never` |
 
@@ -1552,15 +1626,16 @@ Notes are comments, so the file stays a simple list of references — a line may
 be any form `hcm install` accepts, including a collection, which expands to
 every bundle inside it.
 
-**Only GitHub-backed bundles are exported.** A local path means nothing on
-another computer, so those are listed as skipped rather than written out:
+**Only bundles with a remote source are exported** — GitHub, or the clone URL of
+another git host. A local path means nothing on another computer, so those are
+listed as skipped rather than written out:
 
 ```
 ! Skipped 1 local bundle(s), which cannot be fetched elsewhere:
     local-kit (C:\work\local-kit)
 ```
 
-Push a bundle to GitHub and re-register it if you want it to travel. An import
+Push a bundle to a git host and re-register it if you want it to travel. An import
 where some entries fail registers everything it can, reports the rest, and exits
 non-zero.
 

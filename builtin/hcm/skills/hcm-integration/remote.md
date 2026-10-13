@@ -13,15 +13,17 @@ each release. Read the shared rules in [the skill](./SKILL.md) first.
 
 | Method | Downloads | Repository | Update |
 | --- | --- | --- | --- |
-| [A. hcm reads GitHub](#a-hcm-reads-github) | An archive of all files of one ref, without history | Public, on GitHub | Register the new tag, then `hcm update` |
-| [B. Sparse partial clone](#b-sparse-partial-clone) | Only the bundle folder, without history | Any git host, public or private | `git fetch`, then `hcm update` |
+| [A. hcm reads the repository](#a-hcm-reads-the-repository) | All files of one ref, without history | Any git host with an HTTPS clone URL. A private repository needs a token | Register the new tag, then `hcm update` |
+| [B. Sparse partial clone](#b-sparse-partial-clone) | Only the bundle folder, without history | Any git host, with the git credentials of the user | `git fetch`, then `hcm update` |
 | [C. Release archive](#c-release-archive) | Only the bundle, as one file | Any host that stores release files | Download and extract again, then `hcm update` |
 
-Method A needs only hcm. Use it when the repository is public and small. If the
-repository is large, use method B or C, or move the bundle to a small
+Method A needs only hcm, and no git. Use it when the repository is small. If
+the repository is large, use method B or C, or move the bundle to a small
 repository of its own.
 
-## A. hcm reads GitHub
+## A. hcm reads the repository
+
+For a repository on GitHub:
 
 ```bash
 hcm registry add owner/repo/hcm-bundle#v1.2.0
@@ -30,8 +32,22 @@ hcm install my-lib -t claude-code
 
 - hcm downloads an archive of the ref `v1.2.0` from GitHub. The archive has all files of that ref, but no git history. hcm keeps only the `hcm-bundle` folder.
 - hcm keeps the download in its cache, `~/.hcm/cache`.
-- This method works only for public repositories.
+- This short form works only for public repositories.
 - The reference after `#` is a tag, a branch or a commit SHA. If a branch name contains `/`, use this short form, not a `/tree/` URL.
+
+For a repository on another git host, give the HTTPS clone URL. Examples of
+hosts are Azure DevOps, Bitbucket, GitLab and a self-hosted server:
+
+```bash
+hcm registry add https://dev.azure.com/org/project/_git/repo#v1.2.0:hcm-bundle
+hcm install my-lib -t claude-code
+```
+
+- The form is `<clone-url>#<ref>:<folder>`. Without a ref, hcm reads the default branch: `<clone-url>#:hcm-bundle`.
+- hcm uses the git protocol over HTTPS, and does not start git. It downloads the files of that ref, but no git history.
+- An SSH URL does not work. Use the HTTPS clone URL.
+- For a private repository, the user sets an access token in an environment variable: `HCM_GIT_TOKEN`, or `HCM_GIT_TOKEN_<HOST>` for one host, for example `HCM_GIT_TOKEN_DEV_AZURE_COM`. Do not put the token in the URL. hcm refuses a URL that contains a password.
+- To read a private GitHub repository this way, write `git+` before the URL: `git+https://github.com/owner/repo.git#v1.2.0:hcm-bundle`.
 
 To update to a new release, register the new tag. The entry keeps its id. Then
 install the new version into each project:
@@ -43,11 +59,12 @@ hcm update my-lib
 
 To follow a branch, register it: `hcm registry add owner/repo/hcm-bundle#main`.
 Then each `hcm update my-lib` downloads the latest commit of the branch.
+`hcm registry update my-lib` downloads it too, but does not change a project.
 
 ## B. Sparse partial clone
 
 Git can download one folder of a repository. Use git when the repository is
-private, when it is not on GitHub, or when it is large. Git uses the
+large, or when the user has git credentials but no access token. Git uses the
 credentials of the user, as for any clone.
 
 ```bash

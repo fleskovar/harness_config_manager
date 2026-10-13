@@ -40,8 +40,9 @@ so hcm stops when it needs an answer. Give each answer on the command line:
 3. Install the bundle: `hcm install <bundle> -t <harness> --no-prompt`.
 4. Check the result: `hcm status`.
 
-A `<bundle>` is a registered name, a registered id, a local path, or a GitHub
-reference such as `owner/repo/path#v1.0.0`. You can give more than one bundle and
+A `<bundle>` is a registered name, a registered id, a local path, a GitHub
+reference such as `owner/repo/path#v1.0.0`, or the HTTPS clone URL of a
+repository on another git host. You can give more than one bundle and
 more than one harness. Put the bundle names before `-t`, because `-t` takes all
 the values after it:
 
@@ -62,17 +63,19 @@ Register a bundle to install it by name or id:
 ```bash
 hcm registry add ./my-kit                  # a local folder; hcm copies it
 hcm registry add owner/repo/path#v1.0.0    # a folder in a GitHub repository, at a tag
+hcm registry add https://dev.azure.com/org/project/_git/repo#v1.0.0:path   # the same, on another git host
 hcm registry add ./my-kit --dev            # a folder that you edit; hcm reads it in place
 ```
 
 hcm copies a registered bundle into its store. A change at the source has no
-effect until `hcm update`. A `--dev` bundle has no copy, so each install reads
+effect until `hcm update` or `hcm registry update`. A `--dev` bundle has no copy, so each install reads
 the latest edits.
 
 ## Update and remove
 
 | Task | Command |
 | --- | --- |
+| Get the latest version of the registered bundles from their sources, without a change to a project | `hcm registry update` |
 | Install the new version of each bundle in this project | `hcm update -t <harness> --no-prompt` |
 | Install the new version of one bundle | `hcm update <bundle> -t <harness> --no-prompt` |
 | Remove a bundle, and the dependencies that no other bundle needs | `hcm uninstall <bundle> -t <harness>` |

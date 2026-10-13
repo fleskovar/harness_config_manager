@@ -261,9 +261,17 @@ export interface LoadedBundle {
 // Sources & registry
 // ---------------------------------------------------------------------------
 
+/**
+ * Where a bundle comes from.
+ *
+ * `github` is downloaded as an archive of a ref. `git` is any other host, by
+ * its HTTPS clone URL, read with the git protocol -- see `core/git.ts`. Both
+ * can name a folder of the repository with `subdir`.
+ */
 export type BundleSource =
   | { type: 'local'; path: string }
-  | { type: 'github'; owner: string; repo: string; ref: string; subdir?: string };
+  | { type: 'github'; owner: string; repo: string; ref: string; subdir?: string }
+  | { type: 'git'; url: string; ref: string; subdir?: string };
 
 export interface RegistryEntry {
   /**

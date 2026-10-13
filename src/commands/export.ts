@@ -1,15 +1,15 @@
 /**
  * Export the current setup as a plain list of bundle sources.
  *
- * Only GitHub-backed bundles are exported: a local path means nothing on
- * another machine, so those are reported as skipped rather than written out.
+ * Only bundles with a remote source are exported: a local path means nothing
+ * on another machine, so those are reported as skipped rather than written out.
  * The one exception is a bundle built into hcm, which every machine with hcm
  * has, and which is written by name.
  */
 
 import path from 'node:path';
 import { isBuiltinName } from '../core/builtin.js';
-import { describeSource } from '../core/github.js';
+import { describeSource, sourceReference } from '../core/github.js';
 import { color, log } from '../core/logger.js';
 import { readRegistry } from '../core/registry.js';
 import { readState } from '../core/state.js';
@@ -29,10 +29,7 @@ export interface ExportOptions {
 
 /** The reference form we write out, which `hcm import` can read back. */
 export function sourceToReference(source: BundleSource): string | undefined {
-  if (source.type !== 'github') return undefined;
-  const subdir = source.subdir ? `/${source.subdir}` : '';
-  const ref = source.ref && source.ref !== 'HEAD' ? `#${source.ref}` : '';
-  return `${source.owner}/${source.repo}${subdir}${ref}`;
+  return source.type === 'local' ? undefined : sourceReference(source);
 }
 
 export async function exportCommand(file: string | undefined, options: ExportOptions): Promise<void> {

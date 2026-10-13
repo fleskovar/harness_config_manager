@@ -10,6 +10,7 @@ import path from 'node:path';
 import { x as extractTar } from 'tar';
 import { HcmError } from './errors.js';
 import { ensureDir, fs, isDirectory, pathExists } from './fsx.js';
+import { describeGitSource, type FetchOptions, fetchGitBundle, gitReference } from './git.js';
 import { cacheDir } from './paths.js';
 import type { BundleSource } from './types.js';
 
@@ -114,8 +115,21 @@ function trimSlashes(value: string): string {
 
 export function describeSource(source: BundleSource): string {
   if (source.type === 'local') return source.path;
+  if (source.type === 'git') return describeGitSource(source);
   const subdir = source.subdir ? `/${source.subdir}` : '';
   return `github:${source.owner}/${source.repo}${subdir}#${source.ref}`;
+}
+
+/**
+ * The text that reads back into this source, anywhere a bundle is accepted.
+ * A local source gives its path, which has a meaning only on this machine.
+ */
+export function sourceReference(source: BundleSource): string {
+  if (source.type === 'local') return source.path;
+  if (source.type === 'git') return gitReference(source);
+  const subdir = source.subdir ? `/${source.subdir}` : '';
+  const ref = source.ref && source.ref !== 'HEAD' ? `#${source.ref}` : '';
+  return `${source.owner}/${source.repo}${subdir}${ref}`;
 }
 
 function cacheKey(source: Extract<BundleSource, { type: 'github' }>): string {
@@ -128,12 +142,14 @@ function cacheKey(source: Extract<BundleSource, { type: 'github' }>): string {
  */
 export async function fetchGithubBundle(
   source: Extract<BundleSource, { type: 'github' }>,
-  options: { refresh?: boolean } = {},
+  options: FetchOptions = {},
 ): Promise<string> {
   const root = path.join(await cacheDir(), cacheKey(source));
   const bundleDir = source.subdir ? path.join(root, ...source.subdir.split('/')) : root;
 
-  if (!options.refresh && (await isDirectory(bundleDir))) return bundleDir;
+  // One command downloads a repository once -- see `FetchOptions`.
+  const refresh = options.refresh && !options.fetched?.has(root);
+  if (!refresh && (await isDirectory(bundleDir))) return bundleDir;
 
   if (await pathExists(root)) await fs.rm(root, { recursive: true, force: true });
   await ensureDir(root);
@@ -145,7 +161,8 @@ export async function fetchGithubBundle(
   if (!response.ok) {
     throw new HcmError(
       `Failed to download ${describeSource(source)} (HTTP ${response.status})`,
-      'Check the repository name and ref, and that the repository is public.',
+      'Check the repository name and ref. For a private repository, set HCM_GIT_TOKEN and ' +
+        `use "git+https://github.com/${source.owner}/${source.repo}.git".`,
     );
   }
 
@@ -155,6 +172,7 @@ export async function fetchGithubBundle(
   // GitHub tarballs nest everything under `<repo>-<ref>/`; strip that level.
   await extractTar({ file: archive, cwd: root, strip: 1 });
   await fs.rm(archive, { force: true });
+  options.fetched?.add(root);
 
   if (!(await isDirectory(bundleDir))) {
     throw new HcmError(
@@ -177,7 +195,7 @@ async function defaultBranch(source: Extract<BundleSource, { type: 'github' }>):
 /** Resolve any source to a local directory, downloading when needed. */
 export async function resolveSource(
   source: BundleSource,
-  options: { refresh?: boolean } = {},
+  options: FetchOptions = {},
 ): Promise<string> {
   if (source.type === 'local') {
     if (!(await isDirectory(source.path))) {
@@ -185,5 +203,6 @@ export async function resolveSource(
     }
     return source.path;
   }
+  if (source.type === 'git') return fetchGitBundle(source, options);
   return fetchGithubBundle(source, options);
 }

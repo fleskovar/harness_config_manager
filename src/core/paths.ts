@@ -29,7 +29,7 @@ export function registryFile(): string {
   return path.join(hcmHome(), 'registry.json');
 }
 
-/** Checkout cache for bundles fetched from GitHub; relocatable via config. */
+/** Download cache for bundles fetched from a remote source; relocatable via config. */
 export function cacheDir(): Promise<string> {
   return resolveCacheDir();
 }

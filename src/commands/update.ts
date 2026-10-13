@@ -57,6 +57,8 @@ export interface UpdateOptions {
   decisions?: Map<string, Resolution>;
   /** Parameter answers shared across every bundle and target this run touches. */
   answers?: Map<string, string>;
+  /** Downloads shared across this run: one repository, one download. */
+  fetched?: Set<string>;
   /**
    * Overrides what each installation recorded. Given nothing, every one is
    * reinstalled the way it was installed -- an update should put the new
@@ -108,6 +110,7 @@ export async function updateCommand(
     ...options,
     decisions: options.decisions ?? new Map<string, Resolution>(),
     answers: options.answers ?? new Map<string, string>(),
+    fetched: options.fetched ?? new Set<string>(),
     parameterOverrides,
     ...(chosen ? { targets: chosen } : {}),
     // Three states, not two: no flag reinstalls what each record says, while
@@ -126,7 +129,7 @@ export async function updateCommand(
   // installed here but have nowhere to be re-read from.
   for (const name of selection.unregistered) {
     log.warn(`${name} is installed here but not registered; nothing to update it from`);
-    log.warn(color.dim(`  register its source with: hcm registry add <path|owner/repo>`));
+    log.warn(color.dim(`  register its source with: hcm registry add <path|url|owner/repo>`));
   }
 
   for (const [index, entry] of selection.entries.entries()) {
@@ -292,7 +295,7 @@ async function collectOverrides(options: UpdateOptions): Promise<ParameterOverri
 function reportEmpty(selection: Selection, options: UpdateOptions): void {
   if (!selection.fromLedger) {
     log.info('No bundles registered.');
-    log.info(color.dim('Add one with: hcm registry add <path|owner/repo>'));
+    log.info(color.dim('Add one with: hcm registry add <path|url|owner/repo>'));
     return;
   }
 
@@ -311,6 +314,7 @@ function reportEmpty(selection: Selection, options: UpdateOptions): void {
 async function updateOne(entry: RegistryEntry, options: UpdateOptions): Promise<void> {
   const { entry: updated, bundle, previousVersion } = await refreshEntry(entry, {
     dryRun: options.dryRun ?? false,
+    ...(options.fetched ? { fetched: options.fetched } : {}),
   });
 
   const version =

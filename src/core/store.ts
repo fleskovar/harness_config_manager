@@ -12,6 +12,7 @@
 
 import path from 'node:path';
 import { copyDir, isDirectory, removeDir } from './fsx.js';
+import type { FetchOptions } from './git.js';
 import { resolveSource } from './github.js';
 import { storeDir } from './paths.js';
 import type { BundleSource, RegistryEntry } from './types.js';
@@ -36,7 +37,7 @@ export async function storeEntryDir(slug: string): Promise<string> {
 /**
  * Copy a bundle into the store, replacing whatever was there. `from` is a
  * directory that already holds the bundle -- a working copy for a local source,
- * or a freshly downloaded tarball for a GitHub one.
+ * or a fresh download for a remote one.
  */
 export async function saveToStore(slug: string, from: string): Promise<string> {
   const destination = await storeEntryDir(slug);
@@ -50,7 +51,7 @@ export async function saveToStore(slug: string, from: string): Promise<string> {
 export async function populateStore(
   slug: string,
   source: BundleSource,
-  options: { refresh?: boolean } = {},
+  options: FetchOptions = {},
 ): Promise<string> {
   const origin = await resolveSource(source, options);
   return saveToStore(slug, origin);

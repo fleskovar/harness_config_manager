@@ -23,7 +23,7 @@ The skill files are also in this repository, in
 | --- | --- | --- |
 | A CLI tool or app | `my-cli hcm init` | [`cli.md`](../builtin/hcm/skills/hcm-integration/cli.md) |
 | A library that a project installs as a dependency | `python -m my_library.hcm init`, `npx --no my-lib-hcm init` | [`library.md`](../builtin/hcm/skills/hcm-integration/library.md) |
-| Any software, when users need the bundle without the package | `hcm registry add owner/repo/hcm-bundle#v1.2.0` | [`remote.md`](../builtin/hcm/skills/hcm-integration/remote.md) |
+| Any software, when users need the bundle without the package | `hcm registry add owner/repo/hcm-bundle#v1.2.0`, or `hcm registry add <clone-url>#v1.2.0:hcm-bundle` | [`remote.md`](../builtin/hcm/skills/hcm-integration/remote.md) |
 
 You can combine them. Use the same bundle folder and bundle name for all of them.
 
@@ -89,8 +89,8 @@ installation, so run `install` again after each upgrade of the library.
 Keep the bundle in a folder of your repository, and tag each release. Users can
 then get the bundle without the package. There are three methods:
 
-- **hcm reads GitHub:** `hcm registry add owner/repo/hcm-bundle#v1.2.0`. hcm downloads an archive of all files of that ref, without history, and keeps the folder. This works for public GitHub repositories. To update, register the new tag, then run `hcm update`.
-- **Sparse partial clone:** git downloads only the bundle folder, from any host, with the credentials of the user. To update, run `git fetch` and `git reset`, then `hcm update`.
+- **hcm reads the repository:** `hcm registry add owner/repo/hcm-bundle#v1.2.0` for GitHub, or `hcm registry add <clone-url>#v1.2.0:hcm-bundle` for any other git host. hcm downloads the files of that ref, without history, and keeps the folder. It does not need git. For a private repository, the user sets a token in `HCM_GIT_TOKEN`. To update, register the new tag, then run `hcm update`.
+- **Sparse partial clone:** git downloads only the bundle folder, from any host, with the git credentials of the user. To update, run `git fetch` and `git reset`, then `hcm update`.
 - **Release archive:** the release job attaches the bundle as one `.tar.gz` file. The user extracts it into a permanent folder and registers that folder.
 
 [`remote.md`](../builtin/hcm/skills/hcm-integration/remote.md) has the commands

@@ -56,7 +56,8 @@ options.
 | `hcm validate [dir]` | Check a bundle for common mistakes. |
 | `hcm refs check -p <path>` | Report file references that point to no file. |
 | `hcm refs fix -p <path>` | Repair broken references from a list of candidates. |
-| `hcm registry add <source...>` | Register bundles from a path, `owner/repo`, or a GitHub URL. `--dev` reads a local bundle in place. `-n, --name` sets a different name. |
+| `hcm registry add <source...>` | Register bundles from a path, `owner/repo`, a GitHub URL, or the HTTPS clone URL of any git host. `--dev` reads a local bundle in place. `-n, --name` sets a different name. |
+| `hcm registry update [bundle...]` | Read registered bundles from their sources again, and replace the stored copies. It does not change a project. No argument: all registered bundles. `--dry-run`. |
 | `hcm registry remove <bundle...>` | Unregister bundles and delete their stored copies. |
 | `hcm registry list` | The registered bundles, with ids. `--json`. |
 | `hcm registry open [bundle]` | Show the folder of the store or of one bundle. `--no-open` only prints the path. |
@@ -72,3 +73,4 @@ options.
 | `HCM_PARAM_<NAME>` | A parameter value. |
 | `HCM_REQUIRE_TARGET` | When hcm requires `-t`: `auto`, `always` or `never`. |
 | `HCM_CACHE_DIR`, `HCM_STORE_DIR` | Different folders for the download cache and the bundle store. |
+| `HCM_GIT_TOKEN`, `HCM_GIT_TOKEN_<HOST>` | An access token for a private repository that hcm reads by its clone URL. `<HOST>` is the host name in upper case, with `_` for each other character: `HCM_GIT_TOKEN_DEV_AZURE_COM`. |

@@ -16,7 +16,7 @@ the strategies below. Use the `hcm-bundle-authoring` skill to write the bundle.
 | --- | --- | --- | --- |
 | A CLI tool or app with its own command | A subcommand registers the bundle that ships in the package. | `my-cli hcm init` | [the CLI strategy](./cli.md) |
 | A library or package that a project installs as a dependency | An entry point of the package registers the bundle, or installs it into the current project. | `python -m my_library.hcm init`, `npx --no my-lib-hcm init` | [the library strategy](./library.md) |
-| Any software, when the bundle must be available without the package | The user downloads only the bundle folder, from a repository or a release. | `hcm registry add owner/repo/hcm-bundle#v1.2.0` | [the remote strategy](./remote.md) |
+| Any software, when the bundle must be available without the package | The user downloads only the bundle folder, from a repository or a release. | `hcm registry add owner/repo/hcm-bundle#v1.2.0`, or `hcm registry add <clone-url>#v1.2.0:hcm-bundle` | [the remote strategy](./remote.md) |
 
 You can use more than one strategy. For example, a Python library can supply
 `python -m my_library.hcm init` for its users, and a tag in its repository for

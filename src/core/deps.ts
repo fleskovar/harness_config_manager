@@ -51,7 +51,7 @@ export interface DependencyGraph {
 }
 
 export interface ResolveOptions {
-  /** Re-download GitHub sources rather than using the cache. */
+  /** Re-download remote sources rather than using the cache. */
   refresh?: boolean;
 }
 
@@ -267,8 +267,8 @@ async function fromSibling(
 
 /**
  * A sibling inside the same repository, for a bundle that came from a
- * subdirectory of one. The tarball is already in the cache, so this costs a
- * directory listing rather than a download.
+ * subdirectory of one. The download is already in the cache, so this costs a
+ * directory listing rather than a second download.
  */
 async function fromRepoSibling(
   dependency: BundleDependency,
@@ -279,7 +279,7 @@ async function fromRepoSibling(
   const source = requirer.source;
   // A bundle at the repo root has no siblings inside the repo; anything beside
   // it in the cache belongs to another download entirely.
-  if (source.type !== 'github' || !source.subdir) return undefined;
+  if (source.type === 'local' || !source.subdir) return undefined;
 
   const parentSubdir = source.subdir.split('/').slice(0, -1).filter(Boolean).join('/');
   const { subdir: _wasHere, ...repo } = source;
@@ -358,7 +358,7 @@ async function fromDeclaredSource(
 /**
  * What a `source` in a manifest can point at.
  *
- * A GitHub source means one thing wherever it is read. A *relative* path means
+ * A remote source means one thing wherever it is read. A *relative* path means
  * nothing on its own, so it is read against the bundle that wrote it -- and,
  * when that bundle is a snapshot in the store, against the directory the
  * snapshot was taken from as well, which is where its neighbours still are.
@@ -375,7 +375,7 @@ function declaredSources(declared: string, requirer: LoadedBundle): BundleSource
   const seen = new Set<string>();
 
   for (const base of bases) {
-    // Absolute paths and GitHub sources ignore the base, so two bases usually
+    // Absolute paths and remote sources ignore the base, so two bases usually
     // come to one source; a repeat would only re-download it.
     const source = parseSource(declared, path.resolve(base));
     const key = JSON.stringify(source);

@@ -14,8 +14,8 @@ import { readJsonIfExists, writeJson } from './fsx.js';
 
 export interface HcmConfig {
   /**
-   * Where bundles fetched from GitHub are stored. Acts as a shared cache, so a
-   * bundle downloaded once can be installed into many projects.
+   * Where bundles fetched from a remote source are stored. Acts as a shared
+   * cache, so a bundle downloaded once can be installed into many projects.
    */
   cacheDir?: string;
   /**
@@ -32,7 +32,7 @@ export interface HcmConfig {
 
 /** Settings a user may set, with the help text shown by `hcm config`. */
 export const CONFIG_KEYS: Record<keyof HcmConfig, string> = {
-  cacheDir: 'Directory holding bundles downloaded from GitHub',
+  cacheDir: 'Directory holding bundles downloaded from GitHub and other git hosts',
   storeDir: 'Directory holding the registered bundles themselves',
   requireTarget: 'When to insist on -t: auto (multi-harness folders), always, never',
 };

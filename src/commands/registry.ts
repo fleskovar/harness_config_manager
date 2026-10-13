@@ -11,6 +11,8 @@ import {
   asList,
   availableEntries,
   liveEntries,
+  readRegistry,
+  refreshEntry,
   removeFromRegistry,
   requireEntry,
 } from '../core/registry.js';
@@ -56,7 +58,9 @@ export async function registryAddCommand(
     );
   } else {
     log.info(
-      color.dim('Copied into the store; run "hcm update" to pick up later changes at the source.'),
+      color.dim(
+        'Copied into the store; run "hcm registry update" to pick up later changes at the source.',
+      ),
     );
   }
 
@@ -120,6 +124,81 @@ export async function registryRemoveCommand(
       );
     }
   }
+}
+
+/**
+ * `hcm registry update` -- read registered bundles from their sources again,
+ * and replace the stored copies.
+ *
+ * This is the registry half of `hcm update`. It downloads the latest files of
+ * each remote source and copies each local source again, but it does not touch
+ * a project. `hcm update` then puts the new version where the old one is
+ * installed.
+ *
+ * No argument means every registered bundle. One source that cannot be read
+ * does not stop the others; the command reports it and exits with code 1.
+ */
+export async function registryUpdateCommand(
+  references: string[],
+  options: { dryRun?: boolean } = {},
+): Promise<void> {
+  const entries = await entriesToUpdate(references);
+
+  if (entries.length === 0) {
+    log.info('No bundles registered.');
+    log.info(color.dim('Add one with: hcm registry add <path|url|owner/repo>'));
+    return;
+  }
+
+  // Shared by the whole run, so a repository that holds several of these
+  // bundles is downloaded once.
+  const fetched = new Set<string>();
+  let failed = 0;
+
+  for (const entry of entries) {
+    const label = `${color.dim(`[${entry.id}]`)} ${color.bold(entry.name)}`;
+
+    if (entry.builtin) {
+      log.info(`${label} ${color.dim('is built into hcm; it has the version of the hcm that runs')}`);
+      continue;
+    }
+
+    try {
+      const { bundle, previousVersion } = await refreshEntry(entry, {
+        dryRun: options.dryRun ?? false,
+        fetched,
+      });
+      const version =
+        previousVersion && previousVersion !== bundle.manifest.version
+          ? `${color.dim(`v${previousVersion}`)} → ${color.bold(`v${bundle.manifest.version}`)}`
+          : color.dim(`v${bundle.manifest.version} (same version)`);
+      log.success(`${label} ${version} ${color.dim(describeSource(entry.source))}`);
+    } catch (error) {
+      if (!(error instanceof HcmError)) throw error;
+      failed += 1;
+      log.error(`${label} ${error.message}`);
+      if (error.hint) log.info(color.dim(`  ${error.hint}`));
+    }
+  }
+
+  if (options.dryRun) {
+    log.info(color.dim('Dry run: the store and the registry did not change.'));
+  } else if (failed < entries.length) {
+    log.info(color.dim('Run "hcm update" in a project to install the new versions there.'));
+  }
+  if (failed > 0) process.exitCode = 1;
+}
+
+/** The entries that the references name, in registry order, each one once. */
+async function entriesToUpdate(references: string[]): Promise<RegistryEntry[]> {
+  if (references.length === 0) return (await readRegistry()).entries;
+
+  const wanted = new Map<string, RegistryEntry>();
+  for (const reference of references) {
+    const entry = await requireEntry(reference);
+    wanted.set(entry.id, entry);
+  }
+  return (await availableEntries()).filter((entry) => wanted.has(entry.id));
 }
 
 /** Where a bundle is currently installed, as "target (scope)" labels. */

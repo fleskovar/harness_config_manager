@@ -30,6 +30,7 @@ import {
   registryListCommand,
   registryOpenCommand,
   registryRemoveCommand,
+  registryUpdateCommand,
 } from './commands/registry.js';
 import { refsCheckCommand, refsFixCommand } from './commands/refs.js';
 import { statusCommand } from './commands/status.js';
@@ -193,7 +194,8 @@ program
   .command('install')
   .argument(
     '<bundle...>',
-    'one or more: registered name or id, local path, GitHub URL, or owner/repo[/subdir][#ref]',
+    'one or more: registered name or id, local path, owner/repo[/subdir][#ref], ' +
+      'GitHub URL, or the HTTPS clone URL of any git host',
   )
   .description('install one or more bundles into one or more harnesses')
   .addOption(targetOption())
@@ -205,7 +207,7 @@ program
   .addOption(noPromptOption())
   .option('--dry-run', 'show what would change without writing')
   .option('--force', 'overwrite conflicting items (same as --on-conflict overwrite)')
-  .option('--refresh', 're-download a GitHub bundle instead of using the cache')
+  .option('--refresh', 're-download a remote bundle instead of using the cache')
   .option('--no-deps', 'install only this bundle, not the ones it requires')
   .addOption(piSubagentsOption())
   .action(async (bundles, options) => {
@@ -324,7 +326,10 @@ program
 
 program
   .command('info')
-  .argument('<bundle...>', 'registered name(s), local path(s), GitHub URL(s), or owner/repo')
+  .argument(
+    '<bundle...>',
+    'registered name(s), local path(s), owner/repo, GitHub URL(s), or git clone URL(s)',
+  )
   .description('show what bundles contain and where each item would land')
   .addOption(scopeOption())
   .addOption(flavorOption())
@@ -668,7 +673,8 @@ registry
   .command('add')
   .argument(
     '<source...>',
-    'local path(s), GitHub URL(s) (web, clone or SSH), or owner/repo[/subdir][#ref]',
+    'local path(s), owner/repo[/subdir][#ref], GitHub URL(s) (web, clone or SSH), ' +
+      'or the HTTPS clone URL of any git host, as <url>[#ref[:subdir]]',
   )
   .option('-n, --name <name>', 'override the registered name (one source only)')
   .option('--dev', 'read a local bundle in place, so edits apply without re-registering')
@@ -683,6 +689,15 @@ registry
   .description('unregister a bundle and delete its stored copy')
   .action(async (bundles) => {
     await registryRemoveCommand(bundles, { cwd });
+  });
+
+registry
+  .command('update')
+  .argument('[bundle...]', 'registered bundle name(s) or id(s); omit for all of them')
+  .option('--dry-run', 'read the sources and show the versions without writing')
+  .description('read registered bundles from their sources again, without reinstalling them')
+  .action(async (bundles, options) => {
+    await registryUpdateCommand(bundles, { dryRun: options.dryRun });
   });
 
 registry

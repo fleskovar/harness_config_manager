@@ -8,7 +8,7 @@
  */
 
 import path from 'node:path';
-import { discoverBundleDirs, loadBundle } from './bundle.js';
+import { discoverBundleDirs, findNestedBundleDirs, loadBundle } from './bundle.js';
 import {
   BUILTIN_BUNDLES,
   builtinDir,
@@ -20,7 +20,8 @@ import { HcmError } from './errors.js';
 import { summarizeFlavors } from './flavors.js';
 import { summarizeParameters } from './parameters.js';
 import { isDirectory, readJsonIfExists, toPosix, writeJson } from './fsx.js';
-import { describeSource, parseGithubSource, resolveSource } from './github.js';
+import { type FetchOptions, parseGitSource } from './git.js';
+import { describeSource, parseGithubSource, resolveSource, sourceReference } from './github.js';
 import { registryFile } from './paths.js';
 import { populateStore, removeFromStore, storeEntryDir, storeSlug } from './store.js';
 import type { BundleSource, LoadedBundle, RegistryEntry, RegistryFile } from './types.js';
@@ -168,7 +169,7 @@ export async function availableEntries(): Promise<RegistryEntry[]> {
  */
 export async function entryDir(
   entry: RegistryEntry,
-  options: { refresh?: boolean } = {},
+  options: FetchOptions = {},
 ): Promise<string> {
   if (entry.builtin) {
     const shipped = entry.source.type === 'local' ? entry.source.path : undefined;
@@ -200,10 +201,30 @@ export async function entryDir(
   return populateStore(entry.store, entry.source, { refresh: true });
 }
 
-/** Interpret a user-supplied source: a GitHub shorthand/URL, or a local path. */
+/**
+ * Interpret a user-supplied source: a GitHub shorthand or URL, the HTTPS clone
+ * URL of any other git host, or a local path.
+ *
+ * `git+https://` always means the git protocol, GitHub included -- see
+ * `core/git.ts`.
+ */
 export function parseSource(input: string, cwd: string): BundleSource {
-  const github = parseGithubSource(input);
+  const trimmed = input.trim();
+
+  const github = /^git\+/i.test(trimmed) ? undefined : parseGithubSource(trimmed);
   if (github) return github;
+
+  const git = parseGitSource(trimmed);
+  if (git) return git;
+
+  // Without this, an SSH URL reads as a local path that does not exist.
+  if (/^(?:(?:ssh|git):\/\/|[\w.-]+@[\w.-]+:)/i.test(trimmed)) {
+    throw new HcmError(
+      `"${trimmed}" is an SSH or git:// URL, which hcm reads only for github.com`,
+      'Use the HTTPS clone URL of the repository.',
+    );
+  }
+
   return { type: 'local', path: path.resolve(cwd, input) };
 }
 
@@ -228,7 +249,7 @@ function narrowSource(source: BundleSource, root: string, bundleDir: string): Bu
  */
 export async function loadBundlesFrom(
   source: BundleSource,
-  options: { refresh?: boolean } = {},
+  options: FetchOptions = {},
 ): Promise<LoadedBundle[]> {
   const root = await resolveSource(source, options);
   const dirs = await discoverBundleDirs(root);
@@ -236,11 +257,33 @@ export async function loadBundlesFrom(
   if (dirs.length === 0) {
     throw new HcmError(
       `No bundle found in ${describeSource(source)}`,
-      'Expected a manifest (hcm.yaml) there, or subdirectories that each contain one.',
+      (await nestedBundlesHint(source, root)) ??
+        'Expected a manifest (hcm.yaml) there, or subdirectories that each contain one.',
     );
   }
 
   return Promise.all(dirs.map((dir) => loadBundle(dir, narrowSource(source, root, dir))));
+}
+
+/**
+ * What to say when a source has no bundle at the top, but has some deeper --
+ * the usual layout of a repository that keeps its bundles in a `bundles/`
+ * folder. They are not registered automatically: a repository can also hold
+ * bundles that are test data. The hint names the folder to ask for.
+ */
+async function nestedBundlesHint(source: BundleSource, root: string): Promise<string | undefined> {
+  const nested = await findNestedBundleDirs(root);
+  const first = nested[0];
+  if (!first) return undefined;
+
+  const listed = nested.map((dir) => toPosix(path.relative(root, dir)));
+  const shown = `${listed.slice(0, 5).join(', ')}${listed.length > 5 ? ', ...' : ''}`;
+  const collection = sourceReference(narrowSource(source, root, path.dirname(first)));
+
+  return (
+    `Bundles are in deeper folders: ${shown}. ` +
+    `Give the folder that contains the bundles that you want, for example "${collection}".`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -416,7 +459,7 @@ export async function removeFromRegistry(
 }
 
 /**
- * Re-read a registered bundle from its origin: re-download a GitHub ref, or
+ * Re-read a registered bundle from its origin: re-download a remote ref, or
  * re-copy a local directory. Returns the entry as it now stands, with the
  * version it had before so callers can report the change.
  *
@@ -425,8 +468,14 @@ export async function removeFromRegistry(
  */
 export async function refreshEntry(
   entry: RegistryEntry,
-  options: { dryRun?: boolean } = {},
+  options: { dryRun?: boolean; fetched?: Set<string> } = {},
 ): Promise<{ entry: RegistryEntry; bundle: LoadedBundle; previousVersion?: string }> {
+  // `fetched` makes several entries of one repository share one download.
+  const fresh: FetchOptions = {
+    refresh: true,
+    ...(options.fetched ? { fetched: options.fetched } : {}),
+  };
+
   // Already read in place from the package that is running; there is no
   // origin to go back to and no registry entry to write.
   if (entry.builtin) {
@@ -442,11 +491,11 @@ export async function refreshEntry(
   }
 
   if (options.dryRun) {
-    const bundle = await loadBundle(await resolveSource(entry.source, { refresh: true }), entry.source);
+    const bundle = await loadBundle(await resolveSource(entry.source, fresh), entry.source);
     return { entry, bundle, previousVersion: entry.version };
   }
 
-  const dir = await populateStore(entry.store ?? storeSlug(entry), entry.source, { refresh: true });
+  const dir = await populateStore(entry.store ?? storeSlug(entry), entry.source, fresh);
   return persistRefresh(entry, await loadBundle(dir, entry.source));
 }
 
@@ -486,7 +535,7 @@ export function asList(references: string | string[]): string[] {
 
 /**
  * Resolve a reference to every bundle it names. Accepts a registered name or
- * id, a local path, or a GitHub reference -- so `hcm install ./my-bundle` works
+ * id, a local path, or a remote reference -- so `hcm install ./my-bundle` works
  * without registering first, and a path to a collection installs all of them.
  */
 export async function resolveBundles(

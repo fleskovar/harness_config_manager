@@ -196,6 +196,38 @@ export async function discoverBundleDirs(root: string): Promise<string[]> {
   return found;
 }
 
+/**
+ * Find bundles below the one level that `discoverBundleDirs` searches.
+ *
+ * Used only to say where they are when a source has none at the top. The walk
+ * stops at each bundle it finds, and at `depth` levels, so a large repository
+ * costs a bounded number of directory listings.
+ */
+export async function findNestedBundleDirs(root: string, depth = 4): Promise<string[]> {
+  const found: string[] = [];
+
+  async function walk(dir: string, level: number): Promise<void> {
+    let entries;
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+
+      const candidate = path.join(dir, entry.name);
+      if (await findManifest(candidate)) found.push(candidate);
+      else if (level < depth) await walk(candidate, level + 1);
+    }
+  }
+
+  await walk(path.resolve(root), 1);
+  return found;
+}
+
 export async function loadBundle(root: string, source?: BundleSource): Promise<LoadedBundle> {
   const absoluteRoot = path.resolve(root);
   if (!(await isDirectory(absoluteRoot))) {
