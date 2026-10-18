@@ -43,11 +43,11 @@ help:
 	@echo   link ........... install hcm globally from this checkout
 	@echo   unlink ......... remove the global hcm link
 	@echo   pack ........... build a publishable tarball
-	@echo   publish ........ run checks and publish to npm
+	@echo   publish ........ bump the patch, commit, tag and push - GitHub Actions publishes to npm
+	@echo   publish-local .. check, build and publish to npm from here - needs CONFIRM=yes
 	@echo   release ........ check, build, and pack without publishing
-	@echo   version-patch .. bump the patch version and tag it
-	@echo   version-minor .. bump the minor version and tag it
-	@echo   version-major .. bump the major version and tag it
+	@echo   version-minor .. start the next minor version - commits, does not tag
+	@echo   version-major .. start the next major version - commits, does not tag
 	@echo   demo ........... show where the sample bundle would install
 	@echo   clean .......... remove build output and tarballs
 	@echo   distclean ...... clean, and remove node_modules
@@ -140,20 +140,34 @@ unlink:
 pack: check build
 	$(NPM) pack
 
-publish: check build
+# A release is a pushed v* tag: .github/workflows/release.yml checks, builds
+# and publishes it. This target bumps the patch, commits, tags and pushes the
+# commit and the tag. If a developer set a minor or major version that has no
+# release yet, it releases that version without a bump.
+publish:
+	$(NODE) scripts/release.mjs publish
+
+# Publish from this machine, not from CI. A publish cannot be undone, so a
+# mistyped target name must not start one. Make checks CONFIRM first.
+publish-local:
+ifneq ($(CONFIRM),yes)
+	$(error This publishes harness-config-manager to the public npm registry, which cannot be undone. Run again with: make publish-local CONFIRM=yes)
+endif
+	$(MAKE) check
+	$(MAKE) build
 	$(NPM) publish --access public
 
 release: pack
 	@echo Tarball built. Inspect it, then run "make publish" to release.
 
-version-patch:
-	$(NPM) version patch
-
+# make publish bumps the patch. A developer decides the minor and the major.
+# These targets commit the new version and do not tag it. make publish
+# releases it.
 version-minor:
-	$(NPM) version minor
+	$(NODE) scripts/release.mjs bump minor
 
 version-major:
-	$(NPM) version major
+	$(NODE) scripts/release.mjs bump major
 
 ## ---------------------------------------------------------------- demo
 

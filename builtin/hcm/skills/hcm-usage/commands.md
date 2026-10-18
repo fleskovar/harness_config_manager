@@ -13,7 +13,7 @@ Run `hcm <command> --help` for the options of the installed version.
 | `--params-file <file>` | Parameter values from a YAML or JSON file. |
 | `--no-prompt` | Do not ask questions. Use the values on the command line, then the defaults. |
 | `--dry-run` | Show the changes. Do not write. |
-| `--on-conflict <policy>` | For an item that is already there and different: `prompt`, `skip`, `overwrite` or `abort`. |
+| `--on-conflict <policy>` | For an item that is already there and different: `prompt`, `skip`, `overwrite`, `rename` or `abort`. `rename` installs the item with the bundle name as a suffix, for example `audit-my-kit`. |
 | `--force` | Overwrite conflicts, and remove items that somebody edited. |
 
 `-t` and `-f` take all the values after them. Put bundle names before these

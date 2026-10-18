@@ -9,13 +9,16 @@
  * Four outcomes:
  *   skip       leave what is on disk; drop our writes for that resource
  *   overwrite  write ours over theirs (this is what --force does to everything)
- *   rename     install under a different name -- MCP servers only, because they
- *              are addressed by name and the bundle's own instructions can be
- *              rewritten to match (see rename.ts)
+ *   rename     install under a different name -- the bundle's name as a suffix
+ *              unless the user types another. Offered for every kind addressed
+ *              by name; the bundle's own instructions are rewritten to match
+ *              (see rename.ts)
  *   abort      stop the whole run having written nothing
  *
  * Every choice is remembered for the run, so a bundle installed into three
- * harnesses asks once rather than three times.
+ * harnesses asks once rather than three times. A rename is also recorded with
+ * the installation, so `hcm update` installs the new version under the same
+ * name.
  */
 
 import { AbortedError, ConflictError } from './errors.js';
@@ -24,7 +27,13 @@ import { applicableParameters, applyParameters } from './parameters.js';
 import { detectConflicts, resourceActions } from './planner.js';
 import { isInteractive, select, text } from './prompt.js';
 import { remapReferences } from './refmap.js';
-import { NAME_PATTERN, rewriteReferences } from './rename.js';
+import {
+  bareMatchFor,
+  canRename,
+  disambiguatedName,
+  isUsableName,
+  rewriteReferences,
+} from './rename.js';
 import { getTarget } from '../targets/index.js';
 import {
   type BundleResource,
@@ -35,7 +44,15 @@ import {
 } from './types.js';
 
 /** What to do with conflicts when nobody is there to ask. */
-export type ConflictPolicy = 'prompt' | 'skip' | 'overwrite' | 'abort';
+export type ConflictPolicy = 'prompt' | 'skip' | 'overwrite' | 'rename' | 'abort';
+
+export const CONFLICT_POLICIES: readonly ConflictPolicy[] = [
+  'prompt',
+  'skip',
+  'overwrite',
+  'rename',
+  'abort',
+];
 
 export type ConflictChoice = 'skip' | 'overwrite' | 'rename' | 'abort';
 
@@ -51,6 +68,10 @@ export interface ConflictGroup {
   key: string;
   /** Human label, e.g. `mcp "light-plan"`. */
   label: string;
+  /** The bundle being installed, which the resource comes from. */
+  bundle: string;
+  /** What it collides with, in words -- see `describeHolders`. */
+  holders: string;
   resource?: BundleResource;
   conflicts: PlanConflict[];
   /** Renaming only makes sense where the name is the address. */
@@ -74,11 +95,66 @@ export interface ResolutionOutcome {
   label: string;
   choice: ConflictChoice;
   detail: string;
+  /** What the resource collided with, in words. Absent for a carried rename. */
+  against?: string;
+}
+
+/**
+ * What a set of conflicts collides with, in words:
+ *
+ *   bundle "other-kit"
+ *   bundles "a", "b" and content that no bundle installed
+ *   an edited copy of its earlier install
+ *
+ * `bundleName` is the bundle being installed. It holds an item only when its
+ * own earlier copy of that item was edited.
+ */
+export function describeHolders(
+  conflicts: readonly { owners?: string[] }[],
+  bundleName: string,
+): string {
+  const holders = [...new Set(conflicts.flatMap((conflict) => conflict.owners ?? []))];
+  const others = holders.filter((name) => name !== bundleName);
+  const parts: string[] = [];
+
+  if (others.length > 0) {
+    parts.push(
+      `${others.length === 1 ? 'bundle' : 'bundles'} ${others.map((name) => `"${name}"`).join(', ')}`,
+    );
+  }
+  if (holders.includes(bundleName)) parts.push('an edited copy of its earlier install');
+  if (conflicts.some((conflict) => !conflict.owners?.length)) {
+    parts.push('content that no bundle installed');
+  }
+
+  if (parts.length <= 1) return parts[0] ?? 'content that no bundle installed';
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }
 
 export interface ResolvedPlan {
   plan: InstallPlan;
   outcomes: ResolutionOutcome[];
+  /**
+   * Resources installed under another name: `resourceKey` of the bundle's
+   * original -> the name it was installed as. Recorded with the installation.
+   */
+  renames: Record<string, string>;
+}
+
+/**
+ * Put renames recorded by an earlier installation into `decisions`, so that
+ * this run installs those resources under the same names again. An answer
+ * already given in this run wins.
+ */
+export function seedRenames(
+  decisions: Map<string, Resolution>,
+  bundleName: string,
+  renames: Record<string, string>,
+): void {
+  for (const [key, newName] of Object.entries(renames)) {
+    const stored = `${bundleName}/${key}`;
+    if (!decisions.has(stored)) decisions.set(stored, { choice: 'rename', newName });
+  }
 }
 
 /** Guards against a rename that keeps landing on another taken name. */
@@ -120,17 +196,42 @@ export async function resolvePlanConflicts(
     )?.resource;
     if (!current) return undefined;
 
-    const fresh = resourceActions(
+    const label = `${current.kind} "${current.name}"`;
+    const { kept, insertAt } = extract(actions, key);
+    const generated = resourceActions(
       target,
       { ...current, name: newName },
       bundleName,
       plan.scope,
       plan.targetOptions,
     );
-    const { kept, insertAt } = extract(actions, key);
-    // Only the *other* resources get their references rewritten: the renamed
-    // one was regenerated, and rewriting it would also rename its command.
-    const rewrite = rewriteReferences(kept, current.name, newName);
+
+    // The new name must not land on something else this bundle writes.
+    const taken = new Set(kept.map(slotOf).filter((slot) => slot !== undefined));
+    const clash = generated.find((action) => taken.has(slotOf(action) ?? ''));
+    if (clash) {
+      throw new AbortedError(
+        `Cannot rename ${label} to "${newName}": this bundle also writes ${clash.describe}`,
+      );
+    }
+
+    const rewrite = rewriteReferences(
+      kept,
+      current.name,
+      newName,
+      bareMatchFor(current.kind, current.name),
+    );
+
+    // The renamed resource was regenerated from the bundle, so its own text
+    // still holds the bundle's original name. A markdown resource can mention
+    // itself (`run /review-pr again`), so rewrite that too. An MCP server is
+    // left alone: its definition names the executable, which keeps its name.
+    const original = originalOf(plan, current)?.name ?? current.name;
+    const fresh =
+      current.kind === 'mcp'
+        ? generated
+        : rewriteReferences(generated, original, newName, bareMatchFor(current.kind, original))
+            .actions;
 
     const combined = [
       ...rewrite.actions.slice(0, insertAt),
@@ -151,7 +252,7 @@ export async function resolvePlanConflicts(
     answered.add(key);
 
     return {
-      label: `${current.kind} "${current.name}"`,
+      label,
       choice: 'rename',
       detail:
         `installed as "${newName}"` +
@@ -185,7 +286,11 @@ export async function resolvePlanConflicts(
   }
 
   if (conflicts.length === 0) {
-    return { plan: { ...plan, actions, conflicts, skipped }, outcomes };
+    return {
+      plan: { ...plan, actions, conflicts, skipped },
+      outcomes,
+      renames: renamesIn(plan, actions),
+    };
   }
 
   const resolver = pickResolver(options, () => conflicts, bundleName);
@@ -203,7 +308,7 @@ export async function resolvePlanConflicts(
       answered.add(group.key);
 
       if (resolution.choice === 'abort') {
-        throw new AbortedError(`Aborted at ${group.label}`);
+        throw new AbortedError(`Aborted at ${group.label} from bundle "${bundleName}"`);
       }
 
       if (resolution.choice === 'overwrite') {
@@ -212,6 +317,7 @@ export async function resolvePlanConflicts(
           label: group.label,
           choice: 'overwrite',
           detail: group.conflicts.map((conflict) => conflict.path).join(', '),
+          against: group.holders,
         });
         continue;
       }
@@ -228,6 +334,7 @@ export async function resolvePlanConflicts(
           label: group.label,
           choice: 'skip',
           detail: `${before - actions.length} write(s) dropped`,
+          against: group.holders,
         });
         continue;
       }
@@ -235,8 +342,10 @@ export async function resolvePlanConflicts(
       // Rename. Regenerate this resource's writes under the new name, then
       // point the rest of the bundle's instructions at it.
       const outcome = resolution.newName ? rename(group.key, resolution.newName) : undefined;
-      if (!outcome) throw new AbortedError(`Cannot rename ${group.label}`);
-      outcomes.push(outcome);
+      if (!outcome) {
+        throw new AbortedError(`Cannot rename ${group.label} from bundle "${bundleName}"`);
+      }
+      outcomes.push({ ...outcome, against: group.holders });
     }
 
     conflicts = await detectConflicts(actions, plan.scopeRoot, bundleName, options.cwd);
@@ -245,7 +354,8 @@ export async function resolvePlanConflicts(
   const unresolved = conflicts.filter((conflict) => !accepted.has(groupKey(conflict)));
   if (unresolved.length > 0) {
     throw new ConflictError(
-      `Could not resolve ${unresolved.length} conflict(s) installing "${bundleName}"`,
+      `Could not resolve ${unresolved.length} conflict(s) installing "${bundleName}", ` +
+        `which clashes with ${describeHolders(unresolved, bundleName)}`,
       unresolved,
     );
   }
@@ -253,7 +363,40 @@ export async function resolvePlanConflicts(
   return {
     plan: { ...plan, actions, conflicts, skipped },
     outcomes,
+    renames: renamesIn(plan, actions),
   };
+}
+
+/** The resource as the bundle has it, before any rename in this run. */
+function originalOf(plan: InstallPlan, resource: BundleResource): BundleResource | undefined {
+  return plan.bundle.resources.find(
+    (candidate) => candidate.kind === resource.kind && candidate.bundlePath === resource.bundlePath,
+  );
+}
+
+/** Every resource in `actions` that carries a name other than the bundle's. */
+function renamesIn(plan: InstallPlan, actions: PlanAction[]): Record<string, string> {
+  const renames: Record<string, string> = {};
+  for (const action of actions) {
+    if (!action.resource) continue;
+    const original = originalOf(plan, action.resource);
+    if (original && original.name !== action.resource.name) {
+      renames[resourceKey(original)] = action.resource.name;
+    }
+  }
+  return renames;
+}
+
+/**
+ * The one item an action owns, when it owns one outright: a whole file, a JSON
+ * key, a marker block. Array items are shared by design, so they have none.
+ */
+function slotOf(action: PlanAction): string | undefined {
+  const { payload } = action;
+  if (payload.kind === 'file') return action.path;
+  if (payload.kind === 'json-value') return `${action.path}::${payload.pointer.join('.')}`;
+  if (payload.kind === 'block') return `${action.path}::${payload.blockId}`;
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -280,18 +423,27 @@ function groupConflicts(conflicts: PlanConflict[], bundleName: string): Conflict
     }
 
     const resource = conflict.resource;
-    const canRename = resource?.kind === 'mcp';
+    const renamable = resource !== undefined && canRename(resource.kind);
     groups.set(key, {
       key,
       label: describeResource(resource, conflict.path),
+      bundle: bundleName,
+      holders: '',
       resource,
       conflicts: [conflict],
-      canRename,
-      ...(canRename && resource ? { suggestedName: `${bundleName}-${resource.name}` } : {}),
+      canRename: renamable,
+      ...(renamable
+        ? { suggestedName: disambiguatedName(resource.kind, resource.name, bundleName) }
+        : {}),
     });
   }
 
-  return [...groups.values()];
+  // Worded once every conflict of the resource is in: one skill can collide
+  // with two bundles at once.
+  return [...groups.values()].map((group) => ({
+    ...group,
+    holders: describeHolders(group.conflicts, bundleName),
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -368,46 +520,75 @@ function pickResolver(
   if (options.policy === 'prompt' || options.policy === 'abort') {
     const conflicts = current();
     throw new ConflictError(
-      `${conflicts.length} conflict(s) installing "${bundleName}"`,
+      `${conflicts.length} conflict(s) installing "${bundleName}", ` +
+        `which clashes with ${describeHolders(conflicts, bundleName)}`,
       conflicts,
     );
   }
+
+  if (options.policy === 'rename') return renameResolver;
 
   const choice: ConflictChoice = options.policy;
   return async () => ({ choice });
 }
 
+/**
+ * `--on-conflict rename`: every resource that collides installs under the
+ * suggested name. A collision with no name to change -- a settings key, say --
+ * stops the run, because neither keeping nor replacing it was asked for.
+ */
+const renameResolver: ConflictResolver = async (group) => {
+  if (!group.canRename || !group.suggestedName) {
+    throw new ConflictError(
+      `${group.label} from bundle "${group.bundle}" has no name to change`,
+      group.conflicts,
+    );
+  }
+  return { choice: 'rename', newName: group.suggestedName };
+};
+
 /** Ask, once per resource. */
 export const promptResolver: ConflictResolver = async (group) => {
   log.plain('');
-  log.warn(`${group.label} conflicts with what is already installed:`);
+  log.warn(`${group.label} from bundle "${group.bundle}" conflicts with ${group.holders}:`);
   for (const conflict of group.conflicts) {
     log.plain(`    ${color.dim(conflict.path)}  ${conflict.detail}`);
   }
 
+  const from = `"${group.bundle}"`;
+  const skip = {
+    value: 'skip' as const,
+    label: 'skip',
+    detail: `keep what is there now (${group.holders}), install nothing`,
+  };
+  const abort = { value: 'abort' as const, label: 'abort', detail: 'stop; write nothing at all' };
+
   const choice = await select<ConflictChoice>(
-    `  How should hcm handle ${group.label}?`,
+    `  How should hcm handle ${group.label} from bundle ${from}?`,
     group.canRename
       ? [
-          { value: 'skip', label: 'skip', detail: 'keep the existing one, install nothing' },
-          { value: 'overwrite', label: 'replace', detail: 'overwrite it with the bundle version' },
+          skip,
+          { value: 'overwrite', label: 'replace', detail: `overwrite it with the version from ${from}` },
           {
             value: 'rename',
             label: 'rename',
-            detail: 'install under another name and update this bundle’s instructions',
+            detail: group.suggestedName
+              ? `install as "${group.suggestedName}" or another name; update the instructions in ${from}`
+              : `install under another name; update the instructions in ${from}`,
           },
-          { value: 'abort', label: 'abort', detail: 'stop; write nothing at all' },
+          abort,
         ]
       : [
-          { value: 'skip', label: 'skip', detail: 'keep the existing one, install nothing' },
-          { value: 'overwrite', label: 'overwrite', detail: 'replace it with the bundle version' },
-          { value: 'abort', label: 'abort', detail: 'stop; write nothing at all' },
+          skip,
+          { value: 'overwrite', label: 'overwrite', detail: `replace it with the version from ${from}` },
+          abort,
         ],
     'skip',
   );
 
   if (choice !== 'rename') return { choice };
 
+  const kind = group.resource?.kind ?? 'mcp';
   const oldName = group.resource?.name ?? '';
   const newName = await text(
     `  new name for ${group.label}${group.suggestedName ? color.dim(` [${group.suggestedName}]`) : ''}`,
@@ -415,8 +596,10 @@ export const promptResolver: ConflictResolver = async (group) => {
       const candidate = value === '' ? group.suggestedName ?? '' : value;
       if (!candidate) return 'enter a name';
       if (candidate === oldName) return 'that is the name that already clashed';
-      if (!NAME_PATTERN.test(candidate)) {
-        return 'use letters, digits, dots, dashes and underscores';
+      if (!isUsableName(kind, candidate)) {
+        return kind === 'asset'
+          ? 'use letters, digits, dots, dashes and underscores, with / between directories'
+          : 'use letters, digits, dots, dashes and underscores';
       }
       return undefined;
     },

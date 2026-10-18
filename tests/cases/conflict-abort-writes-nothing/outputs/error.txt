@@ -1,1 +1,1 @@
-1 conflict(s) installing "review-kit" into Claude Code
+1 conflict(s) installing "review-kit" into Claude Code, which clashes with content that no bundle installed

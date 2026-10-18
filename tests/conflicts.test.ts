@@ -3,7 +3,7 @@
  *
  * Two separate questions, and they get separate answers:
  *   identical  -> adopt it: install proceeds, uninstall leaves it behind
- *   different  -> ask: skip, overwrite, rename (MCP only), or abort
+ *   different  -> ask: skip, overwrite, rename, or abort
  */
 
 import { promises as fs } from 'node:fs';
@@ -14,6 +14,7 @@ import { loadBundle } from '../src/core/bundle.js';
 import {
   type ConflictGroup,
   type ConflictResolver,
+  describeHolders,
   type Resolution,
   resolvePlanConflicts,
 } from '../src/core/conflicts.js';
@@ -244,7 +245,8 @@ describe('an MCP server that is already configured, differently', () => {
     expect(resolver.asked).toHaveLength(1);
     expect(resolver.asked[0]?.canRename).toBe(true);
     expect(resolver.asked[0]?.label).toBe('mcp "light-plan"');
-    expect(resolver.asked[0]?.suggestedName).toBe('planner-light-plan');
+    // The bundle's name goes on the end, so the old name still reads first.
+    expect(resolver.asked[0]?.suggestedName).toBe('light-plan-planner');
   });
 
   it('skip installs everything else and leaves the server alone', async () => {
@@ -363,7 +365,7 @@ describe('an MCP server that is already configured, differently', () => {
 });
 
 describe('a skill or subagent that is already there', () => {
-  it('offers skip, overwrite and abort but not rename', async () => {
+  it('offers rename too, with the bundle name as a suffix', async () => {
     const bundleRoot = await makeBundle();
     await fs.mkdir(path.join(projectDir, '.claude', 'agents'), { recursive: true });
     await fs.writeFile(path.join(projectDir, '.claude/agents/planner.md'), 'mine, hand written\n');
@@ -372,7 +374,8 @@ describe('a skill or subagent that is already there', () => {
     const resolver = scripted({ 'subagent:planner': { choice: 'skip' } });
     await resolve(built, resolver);
 
-    expect(resolver.asked[0]?.canRename).toBe(false);
+    expect(resolver.asked[0]?.canRename).toBe(true);
+    expect(resolver.asked[0]?.suggestedName).toBe('planner-planner');
     expect(resolver.asked[0]?.label).toBe('subagent "planner"');
   });
 
@@ -576,5 +579,79 @@ describe('rewriteReferences', () => {
       'new',
     );
     expect((result.actions[0]?.payload as { contents: Buffer }).contents).toBe(bytes);
+  });
+});
+
+/** A bundle whose `light-plan` server differs from the one `makeBundle` ships. */
+async function differentBundle(name: string): Promise<string> {
+  const root = await makeBundle(name);
+  await fs.writeFile(path.join(root, 'mcp', 'light-plan.json'), JSON.stringify({ command: 'other' }));
+  return root;
+}
+
+describe('naming who the conflict is with', () => {
+  it('names both bundles when one bundle clashes with another', async () => {
+    const first = await makeBundle('planner');
+    await record(await plan(first), first);
+
+    const resolver = scripted({ 'mcp:light-plan': { choice: 'skip' } });
+    await resolve(await plan(await differentBundle('scheduler')), resolver);
+
+    expect(resolver.asked[0]?.bundle).toBe('scheduler');
+    expect(resolver.asked[0]?.holders).toBe('bundle "planner"');
+    expect(resolver.asked[0]?.conflicts[0]?.detail).toBe(
+      'mcpServers.light-plan is owned by bundle "planner"',
+    );
+  });
+
+  it('names both bundles in the error when nobody can be asked', async () => {
+    const first = await makeBundle('planner');
+    await record(await plan(first), first);
+
+    await expect(
+      resolvePlanConflicts(await plan(await differentBundle('scheduler')), {
+        policy: 'abort',
+        cwd: projectDir,
+      }),
+    ).rejects.toThrow('installing "scheduler", which clashes with bundle "planner"');
+  });
+
+  it('says when no bundle installed what is there', async () => {
+    await writeJson('.mcp.json', { mcpServers: { 'light-plan': { command: 'something-else' } } });
+    const resolver = scripted({ 'mcp:light-plan': { choice: 'skip' } });
+
+    const resolved = await resolve(await plan(await makeBundle()), resolver);
+
+    expect(resolver.asked[0]?.holders).toBe('content that no bundle installed');
+    expect(resolved.outcomes[0]?.against).toBe('content that no bundle installed');
+  });
+
+  it('says when the clash is with its own earlier copy, edited since', async () => {
+    const bundleRoot = await makeBundle();
+    await record(await plan(bundleRoot), bundleRoot);
+    await fs.writeFile(path.join(projectDir, '.claude/agents/planner.md'), 'edited by hand\n');
+
+    const resolver = scripted({ 'subagent:planner': { choice: 'skip' } });
+    await resolve(await plan(bundleRoot), resolver);
+
+    expect(resolver.asked[0]?.holders).toBe('an edited copy of its earlier install');
+    expect(resolver.asked[0]?.conflicts[0]?.detail).toBe(
+      'file was edited since bundle "planner" installed it',
+    );
+  });
+});
+
+describe('describeHolders', () => {
+  it('lists every kind of holder, other bundles first', () => {
+    expect(
+      describeHolders(
+        [{ owners: ['b', 'a'] }, { owners: ['kit'] }, { owners: [] }, { owners: ['a'] }],
+        'kit',
+      ),
+    ).toBe('bundles "b", "a", an edited copy of its earlier install and content that no bundle installed');
+  });
+
+  it('names one bundle in the singular', () => {
+    expect(describeHolders([{ owners: ['other-kit'] }], 'kit')).toBe('bundle "other-kit"');
   });
 });

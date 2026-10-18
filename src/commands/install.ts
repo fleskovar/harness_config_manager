@@ -1,8 +1,10 @@
 import {
   type ConflictPolicy,
   type ConflictResolver,
+  describeHolders,
   type Resolution,
   resolvePlanConflicts,
+  seedRenames,
 } from '../core/conflicts.js';
 import { captureContext } from '../core/context.js';
 import {
@@ -103,6 +105,12 @@ export interface InstallOptions {
    * back before reinstalling, so by then there is no record left to read.
    */
   recordedParameters?: ParameterValues;
+  /**
+   * Renames a previous installation recorded, applied again unless this run
+   * decides otherwise. `hcm update` passes these, for the same reason as
+   * `recordedParameters`.
+   */
+  recordedRenames?: Record<string, string>;
   /**
    * Ask for missing parameter values when there is a terminal. False never
    * asks: defaults are used, and a required value with no default is an error.
@@ -482,10 +490,22 @@ export async function installInto(
     log.debug(`skip ${skip.resource.bundlePath}: ${skip.reason}`);
   }
 
-  const { plan, outcomes } = await resolveConflicts(built, target.title, options);
+  // A resource renamed by an earlier install keeps its new name: moving it
+  // back onto the name that collided would only collide again.
+  const previous = await findInstallation(options.scope, options.cwd, bundle.manifest.name, targetId);
+  const decisions = options.decisions ?? new Map<string, Resolution>();
+  seedRenames(decisions, bundle.manifest.name, options.recordedRenames ?? previous?.renames ?? {});
+
+  const { plan, outcomes, renames } = await resolveConflicts(built, target.title, {
+    ...options,
+    decisions,
+  });
 
   for (const outcome of outcomes) {
-    log.info(`  ${color.cyan(outcome.choice)} ${outcome.label} ${color.dim(`(${outcome.detail})`)}`);
+    const against = outcome.against ? `clashed with ${outcome.against}; ` : '';
+    log.info(
+      `  ${color.cyan(outcome.choice)} ${outcome.label} ${color.dim(`(${against}${outcome.detail})`)}`,
+    );
   }
 
   // What is left is what the user said to overwrite.
@@ -527,7 +547,6 @@ export async function installInto(
   // the flag is compared rather than defaulted -- `previous.auto ?? true` would
   // read every explicit installation as automatic and let the next
   // "hcm uninstall <dependent>" take it away.
-  const previous = await findInstallation(options.scope, options.cwd, bundle.manifest.name, targetId);
   const auto = (role.auto ?? false) && (previous ? previous.auto === true : true);
 
   await upsertInstallation(options.scope, options.cwd, {
@@ -544,6 +563,7 @@ export async function installInto(
     // Everything except the secrets, so `hcm update` can render the new version
     // the same way without being told again.
     ...(Object.keys(parameters.stored).length > 0 ? { parameters: parameters.stored } : {}),
+    ...(Object.keys(renames).length > 0 ? { renames } : {}),
     ...(role.dependencies?.length ? { dependencies: role.dependencies } : {}),
     ...(auto ? { auto: true } : {}),
   });
@@ -813,8 +833,10 @@ async function resolveConflicts(
       for (const conflict of error.conflicts) {
         log.error(`  ${conflict.path}: ${conflict.detail}`);
       }
+      const bundleName = plan.bundle.manifest.name;
       throw new ConflictError(
-        `${error.conflicts.length} conflict(s) installing "${plan.bundle.manifest.name}" into ${targetTitle}`,
+        `${error.conflicts.length} conflict(s) installing "${bundleName}" into ${targetTitle}, ` +
+          `which clashes with ${describeHolders(error.conflicts, bundleName)}`,
         error.conflicts,
       );
     }

@@ -721,7 +721,7 @@ describe('conflict detection', () => {
     await upsertInstallation('project', projectDir, record);
 
     const plan = await buildPlan(await loadBundle(beta), 'claude-code', 'project', projectDir);
-    const owned = plan.conflicts.find((conflict) => conflict.owner === 'alpha');
+    const owned = plan.conflicts.find((conflict) => conflict.owners?.includes('alpha'));
 
     expect(owned).toBeDefined();
     expect(owned?.detail).toContain('mcpServers.shared');

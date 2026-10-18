@@ -488,6 +488,8 @@ async function reinstall(
       // from. This is what makes an update render the new version with the same
       // values the old one had.
       ...(record.parameters ? { recordedParameters: record.parameters } : {}),
+      // The same for renames: a skill installed as `review-my-kit` stays that.
+      ...(record.renames ? { recordedRenames: record.renames } : {}),
       ...(options.parameterOverrides ? { parameterOverrides: options.parameterOverrides } : {}),
       ...(options.reconfigure ? { reconfigure: true } : {}),
       ...(options.prompt === false ? { prompt: false } : {}),

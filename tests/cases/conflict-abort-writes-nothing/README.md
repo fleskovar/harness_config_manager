@@ -53,7 +53,7 @@ because the run is refused as a whole.
    is reached. `outputs/error.txt` holds the message:
 
    ```
-   1 conflict(s) installing "review-kit" into Claude Code
+   1 conflict(s) installing "review-kit" into Claude Code, which clashes with content that no bundle installed
    ```
 
 3. Because planning happens entirely in memory and nothing is written until the

@@ -30,6 +30,7 @@ so hcm stops when it needs an answer. Give each answer on the command line:
 - Give `--no-prompt` to `hcm install`, `hcm update` and `hcm import`. Then hcm does not wait for input.
 - Give each required parameter with `--param NAME=value`. To see the parameters of a bundle, run `hcm info <bundle>`.
 - Give `--on-conflict skip` or `--on-conflict abort` when an item can already exist.
+- Give `--on-conflict rename` when the user wants to keep both items. hcm then installs the bundle item with the bundle name as a suffix, and changes the references in the bundle to the new name.
 - Do not use `--force` or `--on-conflict overwrite` unless the user tells you to. These options replace files that the user wrote or edited.
 - Run each command with `--dry-run` first, and read the plan. If the plan changes files that hcm did not write, ask the user before you continue.
 

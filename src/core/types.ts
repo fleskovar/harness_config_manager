@@ -438,6 +438,15 @@ export interface InstallationRecord {
    */
   parameters?: ParameterValues;
   /**
+   * Resources installed under another name to get past a conflict:
+   * `resourceKey` of the bundle's original (`skill:review`) -> the name it was
+   * installed as. Absent means none was renamed.
+   *
+   * `hcm update` installs the new version under these same names, so an update
+   * never moves a renamed skill back onto the name that collided.
+   */
+  renames?: Record<string, string>;
+  /**
    * The bundles this one required, resolved at install time. `hcm uninstall`
    * reads these to know what is still needed, and what has been orphaned.
    */
@@ -546,8 +555,12 @@ export function resourceKey(resource: BundleResource): string {
 export interface PlanConflict {
   path: string;
   detail: string;
-  /** The bundle that already owns the item, when known. */
-  owner?: string;
+  /**
+   * The bundles that hold the item now. The bundle being installed is one of
+   * them when its own earlier copy was edited. Empty or absent when no bundle
+   * installed the item: somebody wrote it by hand, or another tool did.
+   */
+  owners?: string[];
   /** The resource whose write collided, when known. */
   resource?: BundleResource;
   /** Set for JSON conflicts, so a resolution can name the colliding key. */

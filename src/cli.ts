@@ -38,7 +38,7 @@ import { targetsCommand } from './commands/targets.js';
 import { uninstallCommand } from './commands/uninstall.js';
 import { updateCommand } from './commands/update.js';
 import { validateCommand } from './commands/validate.js';
-import type { ConflictPolicy } from './core/conflicts.js';
+import { CONFLICT_POLICIES, type ConflictPolicy } from './core/conflicts.js';
 import { ConflictError, HcmError } from './core/errors.js';
 import { ALL_FLAVORS } from './core/flavors.js';
 import { ALL_TARGETS } from './core/harnesses.js';
@@ -140,8 +140,9 @@ const flavorOption = () =>
 const conflictOption = () =>
   new Option(
     '--on-conflict <policy>',
-    'what to do when an item is already there: ask, keep the existing one, replace it, or stop',
-  ).choices(['prompt', 'skip', 'overwrite', 'abort']);
+    'what to do when an item is already there: ask, keep the existing one, replace it, ' +
+      'install it with the bundle name as a suffix, or stop',
+  ).choices([...CONFLICT_POLICIES]);
 
 /**
  * Extensions the machine has, which change where a target files things. Stated

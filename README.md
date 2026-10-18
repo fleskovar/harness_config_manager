@@ -1195,14 +1195,26 @@ and it survives until the last claimant is uninstalled. See
 thing by all of them:
 
 ```
-! mcp "light-plan" conflicts with what is already installed:
-    .mcp.json  mcpServers.light-plan already set to a different value
-  How should hcm handle mcp "light-plan"?
-  *1) skip     -- keep the existing one, install nothing
-   2) replace  -- overwrite it with the bundle version
-   3) rename   -- install under another name and update this bundle's instructions
+! skill "audit" from bundle "my-kit" conflicts with bundle "team-kit":
+    .claude/skills/audit/SKILL.md  file is owned by bundle "team-kit"
+  How should hcm handle skill "audit" from bundle "my-kit"?
+  *1) skip     -- keep what is there now (bundle "team-kit"), install nothing
+   2) replace  -- overwrite it with the version from "my-kit"
+   3) rename   -- install as "audit-my-kit" or another name; update the instructions in "my-kit"
    4) abort    -- stop; write nothing at all
 ```
+
+Each conflict names the two sides. The first is the bundle that hcm installs.
+The second is one of these:
+
+- `bundle "<name>"`: another bundle installed the item.
+- `content that no bundle installed`: a person or another tool wrote the item.
+- `an edited copy of its earlier install`: the same bundle installed the item,
+  and somebody changed it after the install.
+
+The same names show in the result line, for example
+`rename skill "audit" (clashed with bundle "team-kit"; installed as "audit-my-kit")`,
+and in the error when hcm stops.
 
 - **skip** — the existing item stays and the rest of the bundle installs as
   normal. For a settings fragment only the colliding keys are dropped, since its
@@ -1210,16 +1222,26 @@ thing by all of them:
   a skill on disk is worse than none.
 - **replace / overwrite** — the bundle's version wins. The old value is kept in
   the receipt and restored when you uninstall.
-- **rename** — offered for MCP servers, which are addressed by name. The server
-  installs under the name you give, *and* every mention of the old name in the
-  rest of the bundle — `mcp__old__tool` prefixes and the bare name in skills,
-  subagents, commands and context — is rewritten to match, so the instructions
-  still point at a server that exists. The number of rewritten mentions is
-  reported; the substitution is textual, so check that count if the old name is
-  also an ordinary word. Names glued to other name characters (`light-plan` in
-  `light-plan-legacy`) are left alone, and the server's own `command` is never
-  rewritten. A rename decided for one harness is applied to the others in the
-  same run, so the server has one name everywhere.
+- **rename** — offered for skills, subagents, commands, rules, assets and MCP
+  servers. Context sections and settings keys have no name to change, so hcm
+  does not offer it for them. The suggested name is the old name with the bundle
+  name as a suffix: `audit` from `my-kit` becomes `audit-my-kit`. If that name
+  is also taken, hcm adds a number: `audit-my-kit-2`. An asset keeps its
+  directory and extension: `scripts/lint.sh` becomes `scripts/lint-my-kit.sh`.
+  Press Enter to accept the suggestion, or type a different name.
+
+  hcm also changes the mentions of the old name in the rest of the bundle, so
+  that the instructions point at the new name. These mentions are
+  `mcp__old__tool` prefixes, paths such as `skills/audit/checklist.md`, slash
+  commands such as `/audit`, and the bare name. A one-word name such as `audit`
+  is also an ordinary word, so hcm changes it only after `/`, `@` or a backtick.
+  hcm does not change a name that is part of a longer name (`light-plan` in
+  `light-plan-legacy`), or the `command` of an MCP server. hcm reports the
+  number of changed mentions. The change is textual, so examine that number.
+
+  A rename for one harness applies to the other harnesses in the same run, so
+  the item has one name in all of them. hcm records the rename with the
+  installation, so `hcm update` installs the new version under the same name.
 - **abort** — stops the whole run with nothing written.
 
 Answers are remembered per bundle for the length of the run: a bundle installed
@@ -1232,6 +1254,7 @@ Decide up front instead:
 ```bash
 hcm install my-kit --on-conflict skip       # keep whatever is already there
 hcm install my-kit --on-conflict overwrite  # same as --force
+hcm install my-kit --on-conflict rename     # keep both: add the bundle name as a suffix
 hcm install my-kit --on-conflict abort      # the default: fail and list them
 hcm install my-kit --on-conflict prompt     # ask even where hcm would not have
 ```
@@ -1691,8 +1714,9 @@ tests/
 | `make link` / `make unlink` | Add or remove `hcm` on your PATH |
 | `make demo` | Show where the sample bundle would install |
 | `make pack` | Build a publishable tarball |
-| `make publish` | Run checks and publish to npm |
-| `make version-patch\|minor\|major` | Bump the version and tag it |
+| `make publish` | Bump the patch, commit, tag and push; GitHub Actions publishes to npm |
+| `make publish-local CONFIRM=yes` | Check, build and publish to npm from this machine |
+| `make version-minor\|major` | Start the next minor or major version; `make publish` releases it |
 | `make clean` | Remove `dist/` and tarballs |
 | `make distclean` | Also remove `node_modules/` |
 | `make reinstall` | `distclean` followed by `setup` |

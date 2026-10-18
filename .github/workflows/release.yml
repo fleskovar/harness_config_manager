@@ -8,8 +8,7 @@
 # or moving it breaks publishing until the npm side is updated to match.
 #
 # Release, each time:
-#   npm version patch   # bumps package.json and creates the matching v* tag
-#   git push --follow-tags
+#   make publish   # bumps the patch, commits, tags v<version> and pushes both
 name: Release
 
 on:

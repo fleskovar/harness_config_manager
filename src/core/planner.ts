@@ -12,7 +12,7 @@ import { applicableParameters, applyParameters } from './parameters.js';
 import { hashValue, sha256 } from './hash.js';
 import { remapReferences } from './refmap.js';
 import { getTarget } from '../targets/index.js';
-import { hasBlock } from '../merge/blocks.js';
+import { extractBlocks, hasBlock } from '../merge/blocks.js';
 import { getAtPointer } from '../merge/json-merge.js';
 import { collidingTables, existingArrayEntryNames, tryParseToml } from '../merge/toml.js';
 import { type Claim, claimingBundles, claimPath, collectClaims, ownedReceipts } from './state.js';
@@ -209,7 +209,7 @@ export async function detectConflicts(
         conflicts.push({
           path: relativePath,
           detail: `file is owned by ${owners(held)}`,
-          owner: claimingBundles(held)[0] as string,
+          owners: claimingBundles(held),
           resource,
         });
         continue;
@@ -237,8 +237,8 @@ export async function detectConflicts(
         else if (!weWroteIt(mine, key) && !unchangedSinceWeWroteIt(mine, key, existing)) {
           conflicts.push({
             path: relativePath,
-            detail: 'file was edited since another bundle installed it',
-            owner: claimingBundles(held)[0] as string,
+            detail: `file was edited since ${owners(held)} installed it`,
+            owners: claimingBundles(held),
             resource,
           });
         }
@@ -251,14 +251,15 @@ export async function detectConflicts(
         else {
           conflicts.push({
             path: relativePath,
-            detail: 'file exists and differs from what we would write',
+            detail: 'file exists and differs, and no bundle installed it',
             resource,
           });
         }
       } else if (!identical && !unchangedSinceWeWroteIt(mine, key, existing)) {
         conflicts.push({
           path: relativePath,
-          detail: 'file was edited since we installed it',
+          detail: `file was edited since bundle "${bundleName}" installed it`,
+          owners: [bundleName],
           resource,
         });
       }
@@ -276,7 +277,7 @@ export async function detectConflicts(
         conflicts.push({
           path: relativePath,
           detail: `${label} is owned by ${owners(held)}`,
-          owner: claimingBundles(held)[0] as string,
+          owners: claimingBundles(held),
           resource,
           pointer: payload.pointer,
         });
@@ -294,8 +295,8 @@ export async function detectConflicts(
         else if (!weWroteIt(mine, key) && !unchangedSinceWeWroteIt(mine, key, existing)) {
           conflicts.push({
             path: relativePath,
-            detail: `${label} was changed since another bundle installed it`,
-            owner: claimingBundles(held)[0] as string,
+            detail: `${label} was changed since ${owners(held)} installed it`,
+            owners: claimingBundles(held),
             resource,
             pointer: payload.pointer,
           });
@@ -308,7 +309,7 @@ export async function detectConflicts(
         else {
           conflicts.push({
             path: relativePath,
-            detail: `${label} already set to a different value`,
+            detail: `${label} already set to a different value, not by any bundle`,
             resource,
             pointer: payload.pointer,
           });
@@ -319,7 +320,8 @@ export async function detectConflicts(
       if (!identical && !unchangedSinceWeWroteIt(mine, key, existing)) {
         conflicts.push({
           path: relativePath,
-          detail: `${label} already set to a different value`,
+          detail: `${label} was changed since bundle "${bundleName}" installed it`,
+          owners: [bundleName],
           resource,
           pointer: payload.pointer,
         });
@@ -346,7 +348,7 @@ export async function detectConflicts(
       conflicts.push({
         path: relativePath,
         detail: `block ${payload.blockId} is owned by ${owners(heldBlock)}`,
-        owner: claimingBundles(heldBlock)[0] as string,
+        owners: claimingBundles(heldBlock),
         resource,
       });
       continue;
@@ -368,9 +370,13 @@ export async function detectConflicts(
         if (fragment.ok) {
           const collisions = collidingTables(parsed.value, fragment.value);
           if (collisions.length > 0) {
+            const held = tomlHolders(existing, (doc) => collisions.some((table) => table in doc));
             conflicts.push({
               path: relativePath,
-              detail: `TOML table(s) already defined: [${collisions.join('], [')}] -- merge by hand`,
+              detail:
+                `TOML table(s) already defined: [${collisions.join('], [')}] ` +
+                `(${heldText(held)}) -- merge by hand`,
+              owners: held,
               resource,
             });
           }
@@ -383,9 +389,13 @@ export async function detectConflicts(
             const present = new Set(existingArrayEntryNames(parsed.value, table));
             for (const name of incoming) {
               if (present.has(name)) {
+                const held = tomlHolders(existing, (doc) =>
+                  existingArrayEntryNames(doc, table).includes(name),
+                );
                 conflicts.push({
                   path: relativePath,
-                  detail: `[[${table}]] named "${name}" already exists`,
+                  detail: `[[${table}]] named "${name}" already exists (${heldText(held)})`,
+                  owners: held,
                   resource,
                 });
               }
@@ -401,8 +411,32 @@ export async function detectConflicts(
 
 /** "bundle \"alpha\"", or "bundles \"alpha\", \"beta\"" -- for conflict messages. */
 function owners(claims: Claim[]): string {
-  const names = claimingBundles(claims);
+  return bundleNames(claimingBundles(claims));
+}
+
+function bundleNames(names: string[]): string {
   return `${names.length === 1 ? 'bundle' : 'bundles'} ${names.map((name) => `"${name}"`).join(', ')}`;
+}
+
+function heldText(names: string[]): string {
+  return names.length > 0 ? `from ${bundleNames(names)}` : 'not from any bundle';
+}
+
+/**
+ * The bundles whose marker blocks in a TOML file define what `defines` looks
+ * for. A table outside every block was written by hand or by another tool.
+ */
+function tomlHolders(
+  existing: string,
+  defines: (doc: Record<string, unknown>) => boolean,
+): string[] {
+  const names = new Set<string>();
+  for (const block of extractBlocks(existing, 'toml')) {
+    const parsed = tryParseToml(block.text);
+    // A block id is `<bundle>/<resource>`; see `blockId`.
+    if (parsed.ok && defines(parsed.value)) names.add(block.id.split('/')[0] as string);
+  }
+  return [...names];
 }
 
 /**

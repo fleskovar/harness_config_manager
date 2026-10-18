@@ -252,7 +252,7 @@ describe('two bundles shipping the same items', () => {
     const paths = plan.conflicts.map((conflict) => conflict.path);
     expect(paths).toContain('.mcp.json');
     expect(paths).toContain('.claude/skills/jira-board/SKILL.md');
-    for (const conflict of plan.conflicts) expect(conflict.owner).toBe('alpha');
+    for (const conflict of plan.conflicts) expect(conflict.owners).toEqual(['alpha']);
   });
 
   it('re-writes a shared file that has gone missing rather than complaining', async () => {

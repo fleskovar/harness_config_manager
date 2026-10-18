@@ -18,12 +18,12 @@ export class AbortedError extends HcmError {
 }
 
 export class ConflictError extends HcmError {
-  readonly conflicts: { path: string; detail: string; owner?: string }[];
+  readonly conflicts: { path: string; detail: string; owners?: string[] }[];
 
-  constructor(message: string, conflicts: { path: string; detail: string; owner?: string }[]) {
+  constructor(message: string, conflicts: { path: string; detail: string; owners?: string[] }[]) {
     super(
       message,
-      'Re-run interactively to decide item by item, or pass --on-conflict skip|overwrite ' +
+      'Re-run interactively to decide item by item, or pass --on-conflict skip|overwrite|rename ' +
         '(--force is the same as --on-conflict overwrite).',
     );
     this.name = 'ConflictError';
