@@ -131,8 +131,20 @@ documentation of the host.
 
 ## Pin the version in a project
 
-A team can record the bundle version in its repository. Put the reference in a
-`bundles.txt` file and commit it:
+A project can install a release with no registration, and follow it:
+
+```bash
+hcm install owner/repo/hcm-bundle#v1.2.0 --track source -t claude-code --no-prompt
+```
+
+- hcm records the reference, with its tag, in `.hcm/state.json`. Commit that file with the installed files. Each checkout of the project then has the same release.
+- `hcm update` reads the same tag again. A registered `my-lib` in another version does not replace it.
+- To move the project to a new release, run `hcm update my-lib --from owner/repo/hcm-bundle#v1.3.0`. The installation follows the new tag from then on, and keeps its parameter values.
+- Other projects of the user can pin other releases.
+
+A team can also record the bundle version in a `bundles.txt` file. This
+registers the bundle, so all projects of the user share one version. Put the
+reference in the file and commit it:
 
 ```
 # bundles.txt
@@ -172,3 +184,21 @@ hcm update my-lib
 
 Update the tag in the README in the release step, together with the version of
 the package and of the bundle.
+
+If projects of your users pin different releases, document the per-project
+commands of [Pin the version in a project](#pin-the-version-in-a-project)
+instead:
+
+````markdown
+Install into one project, at one release:
+
+```bash
+hcm install owner/repo/hcm-bundle#v1.2.0 --track source -t claude-code
+```
+
+Move the project to a new release:
+
+```bash
+hcm update my-lib --from owner/repo/hcm-bundle#v<new-version>
+```
+````

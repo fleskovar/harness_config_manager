@@ -1,0 +1,22 @@
+{
+  "installations": [
+    {
+      "id": "my-lib@claude-code@project",
+      "bundle": "my-lib",
+      "version": "1.1.0",
+      "target": "claude-code",
+      "scope": "project",
+      "source": {
+        "type": "local",
+        "bundle": "my-lib"
+      },
+      "receipts": [
+        {
+          "op": "file",
+          "path": ".claude/skills/my-lib/SKILL.md",
+          "hash": "62a1152f37fbb1621bb429e6505787e8c52384862ce26f229fab80e4a9a7ece7"
+        }
+      ]
+    }
+  ]
+}

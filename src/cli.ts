@@ -48,7 +48,8 @@ import { ALL_FLAVORS } from './core/flavors.js';
 import { ALL_TARGETS } from './core/harnesses.js';
 import { color, configureLogger, log } from './core/logger.js';
 import { closePrompt } from './core/prompt.js';
-import type { Scope, TargetOptions } from './core/types.js';
+import { TRACK_MODES } from './core/tracking.js';
+import type { Scope, TargetOptions, TrackMode } from './core/types.js';
 import { TARGET_IDS } from './targets/index.js';
 
 const program = new Command();
@@ -188,6 +189,17 @@ const paramsFileOption = () =>
     'read parameter values from a YAML or JSON file; repeatable, later files winning',
   ).argParser(collect);
 
+/**
+ * Where `hcm update` reads the next version -- see `core/tracking.ts`. Omitted,
+ * install and update keep what each installation recorded.
+ */
+const trackOption = () =>
+  new Option(
+    '--track <mode>',
+    'where "hcm update" reads the next version: "registry" (the registered bundle), ' +
+      'or "source" (the folder or repository it came from, ignoring the registry)',
+  ).choices([...TRACK_MODES]);
+
 const noPromptOption = () =>
   new Option(
     '--no-prompt',
@@ -214,6 +226,7 @@ program
   .option('--force', 'overwrite conflicting items (same as --on-conflict overwrite)')
   .option('--refresh', 're-download a remote bundle instead of using the cache')
   .option('--no-deps', 'install only this bundle, not the ones it requires')
+  .addOption(trackOption())
   .addOption(piSubagentsOption())
   .action(async (bundles, options) => {
     await installCommand(bundles, {
@@ -224,6 +237,7 @@ program
       force: options.force,
       onConflict: options.onConflict as ConflictPolicy | undefined,
       refresh: options.refresh,
+      ...(options.track ? { track: options.track as TrackMode } : {}),
       // commander gives --no-deps as deps: false, and --no-prompt as prompt: false
       noDeps: options.deps === false,
       params: options.param as string[] | undefined,
@@ -263,9 +277,13 @@ program
   .command('update')
   .argument(
     '[bundle...]',
-    'registered name(s) or id(s), or "all" for every registered bundle; omit for every bundle installed here',
+    'installed or registered name(s) or id(s), or "all" to also refresh every registered bundle; ' +
+      'omit for every bundle installed here',
   )
-  .description('re-read bundles and reinstall them in place (default: everything installed here)')
+  .description(
+    're-read bundles from the registry or from their sources, and reinstall them in place ' +
+      '(default: everything installed here)',
+  )
   .addOption(targetOption())
   // Omitted, each installation keeps the flavors it recorded; passing it
   // re-narrows (or, with "all", widens) every installation this run touches.
@@ -287,8 +305,21 @@ program
   // Omitted, each installation keeps what it recorded; passing it switches
   // every installation this run touches over.
   .addOption(piSubagentsOption())
+  .addOption(trackOption())
+  .option(
+    '--from <source>',
+    'read the bundle from this path or URL, and follow that source from now on',
+  )
+  .option(
+    '--no-registry',
+    'read each bundle from the source recorded in this project; do not refresh the registry',
+  )
   .action(async (bundles, options) => {
     await updateCommand(bundles, {
+      ...(options.track ? { track: options.track as TrackMode } : {}),
+      ...(options.from !== undefined ? { from: options.from as string } : {}),
+      // commander gives --no-registry as registry: false
+      ...(options.registry === false ? { registry: false } : {}),
       targets: options.target,
       scope: options.scope as Scope | 'all' | undefined,
       dryRun: options.dryRun,

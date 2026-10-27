@@ -1,5 +1,5 @@
 ---
-description: Ship an hcm bundle with your software, so that its users can install its agent configuration with hcm. Covers a CLI subcommand such as "my-cli hcm init", an entry point of a library such as "python -m my_library.hcm init" or "npx --no my-lib-hcm init", and a bundle that users download separately from a git repository or a release. Use when the user builds a tool, app or library that comes with agent skills, subagents, MCP servers or other agent configuration. Also use it to sync bundle changes into test projects during development.
+description: Ship an hcm bundle with your software, so that its users can install its agent configuration with hcm. Covers a CLI subcommand such as "my-cli hcm init", an entry point of a library such as "python -m my_library hcm install" or "npx --no my-lib-hcm install" that installs the bundle of the project environment, and a bundle that users download separately from a git repository or a release. Use when the user builds a tool, app or library that comes with agent skills, subagents, MCP servers or other agent configuration. Also use it to upgrade software that ships a bundle with an older integration, for example a library whose "init" command registers the bundle, so that each project follows the bundle of its own environment. Also use it to sync bundle changes into test projects during development.
 flavors: [integration]
 ---
 
@@ -15,26 +15,55 @@ the strategies below. Use the `hcm-bundle-authoring` skill to write the bundle.
 | Your software | Strategy | The user runs | Read |
 | --- | --- | --- | --- |
 | A CLI tool or app with its own command | A subcommand registers the bundle that ships in the package. | `my-cli hcm init` | [the CLI strategy](./cli.md) |
-| A library or package that a project installs as a dependency | An entry point of the package registers the bundle, or installs it into the current project. | `python -m my_library.hcm init`, `npx --no my-lib-hcm init` | [the library strategy](./library.md) |
+| A library or package that a project installs as a dependency | An entry point of the package installs the bundle from the environment of the project into that project. It does not change the registry. | `python -m my_library hcm install`, `npx --no my-lib-hcm install` | [the library strategy](./library.md) |
 | Any software, when the bundle must be available without the package | The user downloads only the bundle folder, from a repository or a release. | `hcm registry add owner/repo/hcm-bundle#v1.2.0`, or `hcm registry add <clone-url>#v1.2.0:hcm-bundle` | [the remote strategy](./remote.md) |
 
 You can use more than one strategy. For example, a Python library can supply
-`python -m my_library.hcm init` for its users, and a tag in its repository for
-the users of other languages. Use the same bundle folder and the same bundle
-name for all strategies.
+`python -m my_library hcm install` for its users, and a tag in its repository
+for the users of other languages. Use the same bundle folder and the same
+bundle name for all strategies.
+
+### Registry or source
+
+Each installation of a bundle in a project follows one of two places. `hcm
+update` reads the next version from that place.
+
+| Mode | `hcm update` reads | Use it for |
+| --- | --- | --- |
+| `registry` | the registered bundle of the same name | a tool that the machine has one time: a CLI, an MCP server, an app |
+| `source` | the folder or repository that the installation came from; the registry is not read | a library that each project installs into its own `.venv/` or `node_modules/` |
+
+The CLI strategy uses `registry`. The library strategy uses `source`, with
+`hcm install <bundle-folder> --track source`. Two projects can then pin two
+versions of the library, and the registry cannot replace either version.
 
 Code for Node.js, Python and Go is in [the examples](./examples.md).
+
+## Software that ships a bundle already
+
+Older integrations of a library register the bundle with `init`, or remove and
+install the bundle again after each upgrade. Such a library does not get the
+new update features. To change it, and to move the projects of its users,
+follow [Upgrade an existing integration](./migrate.md).
+
+Do these steps first, to find what the software ships now:
+
+1. Find the entry point: a CLI subcommand, a module such as `my_library.hcm`, or a `bin` command such as `my-lib-hcm`.
+2. Read the hcm commands that it runs. Look for `hcm registry add`, `hcm install` and `hcm uninstall`.
+3. Find the bundle folder, and read its `hcm.yaml`.
+4. Find the tests and the README sections that mention hcm.
 
 ## Shared rules
 
 ### How hcm gets the bundle
 
 - Your software runs the `hcm` command as a subprocess. It does not import hcm as a library, and it does not write the files in `~/.hcm/`. The registry format belongs to hcm, and the hcm of the user can be a different version.
-- Your software registers the bundle with `hcm registry add <folder>`. hcm copies the folder into its store, and records the folder as the source of the bundle.
+- A CLI tool registers the bundle with `hcm registry add <folder>`. hcm copies the folder into its store, and records the folder as the source of the bundle.
+- A library installs the bundle with `hcm install <folder> --track source`. hcm records the folder in the `.hcm/state.json` file of the project. It does not change the registry.
 - Give hcm an absolute path, or a relative path that starts with `./`. hcm reads a path such as `vendor/my-lib/hcm-bundle` as the GitHub reference `owner/repo/path`, also when the local folder exists.
-- `hcm update <name>` reads the source folder again. Thus the source folder must stay in place. Do not register a temporary folder. Examples of temporary folders are the environments of `npx` without a local install, `uvx` and `pipx run`.
+- `hcm update` reads the source folder again, through the registry or directly. Thus the source folder must stay in place. Do not give hcm a temporary folder. Examples of temporary folders are the environments of `npx` without a local install, `uvx` and `pipx run`.
 - `hcm registry add` is idempotent. A second registration of the same bundle keeps its id and replaces the stored copy. Thus a user can run your registration command again at any time. This is also the upgrade path.
-- The registry has one entry for each bundle name, for each user. The last registration of `my-lib` replaces the earlier one. If projects of one user need different versions of the bundle, use the per-project install of [the library strategy](./library.md#pin-the-bundle-to-one-project).
+- The registry has one entry for each bundle name, for each user. The last registration of `my-lib` replaces the earlier one. If projects of one user need different versions of the bundle, use [the library strategy](./library.md), which does not use the registry.
 
 ### Rules for the bundle
 
@@ -43,7 +72,7 @@ Code for Node.js, Python and Go is in [the examples](./examples.md).
 - Keep all files of the bundle in its folder. A reference to a file outside the bundle folder breaks when hcm installs the bundle.
 - Refer to a command by its name, for example `"command": "my-cli"` in an MCP file. Do not write an absolute path to an installed package. The path is different on each machine.
 - If the bundle needs a value from the user, for example an API URL, declare a parameter. For a secret, declare `secret: true`, or use an environment variable in the MCP or settings file.
-- If the bundle needs a feature of a newer hcm, compare the output of `hcm --version` in your registration command. If the version is too old, tell the user to upgrade hcm.
+- If the bundle or the entry point needs a feature of a newer hcm, check for the option in the `--help` output of the hcm command. For example, `hcm install --help` contains `--track` when hcm can make an installation follow its source. If the option is not there, tell the user to upgrade hcm with `npm install -g harness-config-manager@latest`.
 - If the agents need to know about hcm itself, add `hcm` to the `dependencies` of the bundle. Every hcm installation has the built-in `hcm` bundle.
 
 ### Do not register from an install hook
@@ -55,11 +84,11 @@ the home folder of the user without consent. Give the user an explicit command.
 
 ## Development mode
 
-When you develop the software, you change its bundle often. Register the working
-copy with `hcm registry add <folder> --dev`. Then `hcm update <name>` in each test
-project installs the latest files of the working copy. The CLI strategy
-describes this in [Development mode](./cli.md#development-mode). A library entry
-point uses the same `--dev` option.
+When you develop the software, you change its bundle often. Each test project
+must get the latest files of your working copy:
+
+- A CLI tool registers the working copy with `hcm registry add <folder> --dev`. Then `hcm update <name>` in each test project installs the latest files. See [Development mode](./cli.md#development-mode).
+- A library needs no `--dev` option. Install the library from the checkout into each test project, with `pip install -e <checkout>` or `npm link`. Then run its `install` command there. The installation follows the bundle folder of the checkout, and `hcm update` installs each edit. See [the library strategy](./library.md#development-mode).
 
 ## Test the integration
 
@@ -70,11 +99,18 @@ temporary folder. Then the test does not change the real registry of the user.
 the harnesses. An install with `-s user` writes into the real home folder of the
 user, for example `~/.claude/`. Thus use only project scope in tests.
 
+For a CLI tool, which registers the bundle:
+
 1. Make a temporary folder. Set `HCM_HOME` to it for each subprocess.
 2. Run your registration command.
 3. Run `hcm registry list --json`. Make sure that it lists the bundle with the correct version.
 4. In a second temporary folder, run `hcm install <name> -t claude-code --no-prompt`, then `hcm status`.
 5. Run the registration command again. Make sure that the id of the entry did not change.
+
+For a library, which installs the bundle into the project, follow
+[Test the entry point](./library.md#test-the-entry-point). The main checks are
+that the record has `"track": "source"`, and that a registered version of the
+same bundle does not replace the version of the project.
 
 Also run `hcm validate <bundle-folder>` and `hcm refs check --path <bundle-folder>`
 in the test suite of your software.

@@ -116,6 +116,16 @@ my-cli hcm init        # register the new bundle version
 hcm update my-cli      # install it into each project that has the old version
 ```
 
+The registry records the bundle folder of the tool as its source. Thus the user
+can also use hcm alone after an upgrade, for example after `npm update -g
+my-cli`:
+
+| Command | Effect |
+| --- | --- |
+| `hcm registry update my-cli` | Reads the bundle folder again, and replaces the stored copy. It does not change a project. |
+| `hcm update my-cli` | In a project: refreshes the registry entry, then installs the new version. |
+| `hcm update my-cli --no-registry` | In a project: reads the bundle folder that the project recorded, and installs it. The registry does not change. If the registry has a different version, hcm warns. |
+
 You can also show a notice when the tool starts. Compare the tool version with
 the version of the `my-cli` entry in `hcm registry list --json`. If the two are
 different, print the two commands. Do not show the notice when the entry has

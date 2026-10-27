@@ -1,0 +1,9 @@
+{
+  "describes": "a bundle installed from a path that nobody registered updates from that path",
+  "recordState": true,
+  "steps": [
+    { "install": "my-lib", "targets": ["claude-code"] },
+    { "replaceBundle": "my-lib", "with": "my-lib-v1-1" },
+    { "update": null }
+  ]
+}

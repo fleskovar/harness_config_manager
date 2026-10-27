@@ -23,7 +23,7 @@ import {
   hasFlavor,
   sameFlavors,
 } from '../core/flavors.js';
-import { describeSource } from '../core/github.js';
+import { describeSource, resolveSource } from '../core/github.js';
 import {
   chooseTargets,
   detectHarnesses,
@@ -48,8 +48,21 @@ import {
   withDefaults,
 } from '../core/parameters.js';
 import { buildPlan } from '../core/planner.js';
-import { asList, resolveBundles } from '../core/registry.js';
-import { findInstallation, upsertInstallation } from '../core/state.js';
+import {
+  asList,
+  availableEntries,
+  entryDir,
+  matchEntry,
+  resolveBundles,
+} from '../core/registry.js';
+import { loadBundle } from '../core/bundle.js';
+import { findInstallation, findInstallations, upsertInstallation } from '../core/state.js';
+import {
+  registeredVersion,
+  sameOrigin,
+  sourceInProject,
+  warnIfRegistryDiffers,
+} from '../core/tracking.js';
 import {
   installationId,
   type InstalledDependency,
@@ -60,6 +73,7 @@ import {
   type Scope,
   type TargetId,
   type TargetOptions,
+  type TrackMode,
 } from '../core/types.js';
 import { getTarget, TARGET_IDS } from '../targets/index.js';
 
@@ -138,6 +152,13 @@ export interface InstallOptions {
    * harnesses this very command just created.
    */
   presentTargets?: TargetId[];
+  /**
+   * `--track`: where `hcm update` reads the next version of the bundles named
+   * in this run. With `source`, a registered name is also read from its origin
+   * now, not from the store. Absent keeps what each installation recorded. See
+   * `core/tracking.ts`.
+   */
+  track?: TrackMode;
   cwd: string;
 }
 
@@ -156,6 +177,17 @@ export interface BundleRole {
    * copies nobody asked for.
    */
   targets?: TargetId[];
+  /**
+   * Where `hcm update` reads the next version, recorded with the installation.
+   * Absent keeps what an earlier installation recorded. See `core/tracking.ts`.
+   */
+  track?: TrackMode;
+  /**
+   * Named by a path or URL, with no `--track`. When a bundle of the same name
+   * is registered from another place, `hcm update` follows the registry, and
+   * the install says so.
+   */
+  followsRegistryByName?: boolean;
 }
 
 /**
@@ -172,13 +204,17 @@ export async function installCommand(
 ): Promise<void> {
   const wanted = asList(references);
   const roots: LoadedBundle[] = [];
+  /** Manifest names of the roots that came from the registry. */
+  const registered = new Set<string>();
 
   // Every reference is resolved before anything is planned, so a name that
   // turns out not to exist stops the run before the earlier ones are written.
   for (const reference of wanted) {
-    roots.push(
-      ...(await resolveBundles(reference, options.cwd, { refresh: options.refresh ?? false })),
-    );
+    const resolved = await resolveRoot(reference, options);
+    roots.push(...resolved.bundles);
+    if (resolved.registered) {
+      for (const bundle of resolved.bundles) registered.add(bundle.manifest.name);
+    }
   }
 
   // One shared memory of answers for the whole command -- conflict decisions,
@@ -264,6 +300,7 @@ export async function installCommand(
   // planned its dependency's items are on disk and claimed -- which is what
   // turns a shared asset into one copy with two claims rather than a conflict.
   for (const entry of graph.order) {
+    const track = trackFor(entry, options.track);
     await installBundle(entry.bundle, options, {
       auto: !entry.explicit,
       dependencies: installedDependencies(entry.bundle, graph),
@@ -271,8 +308,72 @@ export async function installCommand(
       ...(targets.get(entry.bundle.manifest.name)
         ? { targets: targets.get(entry.bundle.manifest.name) as TargetId[] }
         : {}),
+      ...(track ? { track } : {}),
+      ...(entry.explicit && !track && !registered.has(entry.bundle.manifest.name)
+        ? { followsRegistryByName: true }
+        : {}),
     });
   }
+}
+
+/**
+ * Resolve one reference of the command line, with `--track` applied.
+ *
+ * `--track source` with a registered name reads the origin of the entry, not
+ * the copy in the store. The installation follows that origin from now on, so
+ * it starts from what is there now. `--track registry` needs a registered
+ * bundle, because there is nothing else for it to follow.
+ */
+async function resolveRoot(
+  reference: string,
+  options: InstallOptions,
+): Promise<{ bundles: LoadedBundle[]; registered: boolean }> {
+  const entry = matchEntry(await availableEntries(), reference);
+
+  if (options.track === 'registry' && !entry) {
+    throw new HcmError(
+      `"${reference}" is not a registered bundle, so it cannot follow the registry`,
+      'Register it with "hcm registry add <path|url>", then install it by name or id. ' +
+        'Or drop --track: an unregistered bundle follows its source.',
+    );
+  }
+
+  if (options.track === 'source' && entry) {
+    if (entry.builtin) {
+      throw new HcmError(
+        `"${entry.name}" is built into hcm and always has the version of the hcm that runs`,
+        'Install it without --track.',
+      );
+    }
+    // A dev entry is its working copy already. Anything else is read fresh.
+    const dir = entry.dev
+      ? await entryDir(entry)
+      : await resolveSource(entry.source, { refresh: true });
+    return { bundles: [await loadBundle(dir, entry.source)], registered: false };
+  }
+
+  const bundles = await resolveBundles(reference, options.cwd, {
+    refresh: options.refresh ?? false,
+  });
+  return { bundles, registered: entry !== undefined };
+}
+
+/**
+ * The mode that one bundle of the run records.
+ *
+ * `--track` applies to the bundles that the user named. It also applies to a
+ * dependency found beside them, or at a source that their manifest names:
+ * that dependency ships with them, so it follows the same source. A
+ * dependency found in the registry follows the registry.
+ */
+function trackFor(
+  entry: DependencyGraph['order'][number],
+  track: TrackMode | undefined,
+): TrackMode | undefined {
+  if (!track) return undefined;
+  if (entry.explicit) return track;
+  if (track === 'source' && (entry.via === 'sibling' || entry.via === 'source')) return 'source';
+  return undefined;
 }
 
 /**
@@ -429,6 +530,8 @@ export async function installBundle(
     return;
   }
 
+  await reportTracking(bundle, role, options);
+
   // A dependency inherits the run's flavors, and a bundle that has never heard
   // of them is all common part -- so it arrives whole. Said out loud, because
   // "--flavor python" reads as if it narrowed everything in the run.
@@ -441,6 +544,44 @@ export async function installBundle(
     logTargetHeader(targetId, options);
     await installInto(bundle, targetId, options, role);
   }
+}
+
+/**
+ * What `hcm update` will read for this bundle, when that is not obvious.
+ *
+ * A bundle pinned to its source can differ from the registered bundle of the
+ * same name. A bundle named by a path, with no `--track`, follows the registry
+ * when its name is registered. That registration can point elsewhere, for
+ * example at a global install while this path is in a virtual environment.
+ * Both facts are worth one line before anything is written.
+ */
+async function reportTracking(
+  bundle: LoadedBundle,
+  role: BundleRole,
+  options: InstallOptions,
+): Promise<void> {
+  // Without --track, each installation keeps the mode it recorded.
+  const recorded = (await findInstallations(options.scope, options.cwd, bundle.manifest.name))
+    .map((record) => record.track)
+    .find((track) => track !== undefined);
+  const track = role.track ?? recorded;
+
+  if (track === 'registry') return;
+  if (track === 'source') {
+    log.info(color.dim('  follows its source: "hcm update" reads it from there, not from the registry'));
+    await warnIfRegistryDiffers(bundle);
+    return;
+  }
+
+  if (!role.followsRegistryByName) return;
+  const registered = await registeredVersion(bundle.manifest.name);
+  if (!registered || sameOrigin(registered.source, bundle.source)) return;
+
+  log.warn(
+    `  ${bundle.manifest.name} is also registered, from ${describeSource(registered.source)}; ` +
+      '"hcm update" will read that copy',
+  );
+  log.warn(color.dim('  to follow this source instead, install it with --track source'));
 }
 
 /** The "Claude Code · project · /path" banner each target's output sits under. */
@@ -549,6 +690,11 @@ export async function installInto(
   // "hcm uninstall <dependent>" take it away.
   const auto = (role.auto ?? false) && (previous ? previous.auto === true : true);
 
+  // A mode chosen once is kept. A plain reinstall must not quietly move a
+  // pinned installation back to the registry. See `core/tracking.ts`.
+  const track = role.track ?? previous?.track;
+  const inProject = sourceInProject(bundle.source, options.scope, options.cwd);
+
   await upsertInstallation(options.scope, options.cwd, {
     id: installationId(bundle.manifest.name, targetId, options.scope),
     bundle: bundle.manifest.name,
@@ -556,6 +702,8 @@ export async function installInto(
     target: targetId,
     scope: options.scope,
     source: bundle.source,
+    ...(inProject ? { sourceInProject: inProject } : {}),
+    ...(track ? { track } : {}),
     installedAt: new Date().toISOString(),
     receipts,
     ...(Object.keys(targetOptions).length > 0 ? { targetOptions } : {}),

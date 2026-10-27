@@ -1,6 +1,6 @@
 name: hcm
 version: 0.1.1
-description: Skills and instructions for agents that install hcm bundles, write hcm bundles, or connect a CLI tool to hcm.
+description: Skills and instructions for agents that install hcm bundles, write hcm bundles, or connect a CLI tool or a library to hcm.
 author: harness-config-manager
 homepage: https://github.com/fleskovar/harness_config_manager
 tags:
@@ -13,4 +13,4 @@ flavors:
   authoring:
     description: The skill to write, check and publish an hcm bundle
   integration:
-    description: The skill to ship a bundle with a CLI tool, with a library, or as a separate download
+    description: The skill to ship a bundle with a CLI tool, with a library, or as a separate download, and to upgrade an older integration

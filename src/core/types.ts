@@ -435,6 +435,15 @@ export interface InstalledDependency {
   range?: string;
 }
 
+/**
+ * Where `hcm update` reads the next version of an installed bundle. See
+ * `core/tracking.ts`.
+ *
+ *   registry  the registered bundle of the same name
+ *   source    the source recorded with the installation; the registry is not read
+ */
+export type TrackMode = 'registry' | 'source';
+
 export interface InstallationRecord {
   /** `${bundle}@${target}@${scope}` */
   id: string;
@@ -442,7 +451,22 @@ export interface InstallationRecord {
   version: string;
   target: TargetId;
   scope: Scope;
+  /** Where the installed files came from: the origin, never the store. */
   source: BundleSource;
+  /**
+   * `source` as a path relative to the project root, when the source is a
+   * folder inside the project, for example in `.venv/` or `node_modules/`.
+   * `hcm update` reads this path first, so another checkout of the project
+   * reads its own copy.
+   */
+  sourceInProject?: string;
+  /**
+   * Where `hcm update` reads the next version. Set only when somebody chose it
+   * with `--track`. Absent means registry when a bundle of that name is
+   * registered, else source -- which is what every record written before this
+   * field existed means too.
+   */
+  track?: TrackMode;
   installedAt: string;
   receipts: Receipt[];
   /**

@@ -22,7 +22,7 @@ The skill files are also in this repository, in
 | Your software | The user runs | Skill file |
 | --- | --- | --- |
 | A CLI tool or app | `my-cli hcm init` | [`cli.md`](../builtin/hcm/skills/hcm-integration/cli.md) |
-| A library that a project installs as a dependency | `python -m my_library.hcm init`, `npx --no my-lib-hcm init` | [`library.md`](../builtin/hcm/skills/hcm-integration/library.md) |
+| A library that a project installs as a dependency | `python -m my_library hcm install`, `npx --no my-lib-hcm install` | [`library.md`](../builtin/hcm/skills/hcm-integration/library.md) |
 | Any software, when users need the bundle without the package | `hcm registry add owner/repo/hcm-bundle#v1.2.0`, or `hcm registry add <clone-url>#v1.2.0:hcm-bundle` | [`remote.md`](../builtin/hcm/skills/hcm-integration/remote.md) |
 
 You can combine them. Use the same bundle folder and bundle name for all of them.
@@ -30,11 +30,12 @@ You can combine them. Use the same bundle folder and bundle name for all of them
 ## Design
 
 - **Your software calls the `hcm` command.** It does not import hcm as a library, and it does not write the files in `~/.hcm/`. The registry format belongs to hcm, and the hcm of the user can be a different version from the one that you tested.
-- **It registers the bundle folder with `hcm registry add <folder>`.** hcm copies the folder into its store, and records the folder as the source of the bundle. `hcm update <name>` reads that folder again.
+- **A tool registers the bundle folder with `hcm registry add <folder>`.** hcm copies the folder into its store, and records the folder as the source of the bundle. `hcm update <name>` reads that folder again.
+- **A library installs the bundle folder with `hcm install <folder> --track source`.** hcm records the folder in the project, and does not change the registry. `hcm update` in the project reads that folder again.
 - **Registration is idempotent.** A second `hcm registry add` of the same bundle keeps its id and replaces the stored copy. Thus the registration command is safe to run again, and it is also the upgrade path.
 - **The registered folder is permanent.** Use the bundle folder inside the installed package, or a permanent folder of your software. Do not register a temporary folder, for example from `npx` without a local install, `uvx` or `pipx run`.
 - **A local path is absolute, or starts with `./`.** hcm reads `vendor/my-lib/hcm-bundle` as the GitHub reference `owner/repo/path`.
-- **One entry for each bundle name, for each user.** The last registration wins. For projects that pin different versions, the library strategy installs the bundle into one project without registering it.
+- **One entry for each bundle name, for each user.** The last registration wins. For projects that pin different versions, the library strategy installs the bundle into each project without registering it.
 - **No install hooks.** Do not run hcm from an npm `postinstall` script or a Python build hook. Package managers can skip them, they run in CI, and they change the home folder of the user without consent.
 
 ## A CLI tool
@@ -46,6 +47,15 @@ hcm install my-cli -t claude-code       # in each project that needs it
 ```
 
 After an upgrade of the tool, run `my-cli hcm init`, then `hcm update my-cli`.
+hcm alone can do the same, because the registry records the bundle folder of
+the tool:
+
+```bash
+npm update -g my-cli
+hcm registry update my-cli          # read the new bundle into the registry
+hcm update my-cli                   # in each project
+hcm update my-cli --no-registry     # or: one project, from the tool folder, with no change to the registry
+```
 
 `my-cli hcm init` does these steps:
 
@@ -64,25 +74,45 @@ A library has no command of its own on the `PATH`. Give it a small entry point
 that the package manager of the project runs:
 
 ```bash
-python -m my_library.hcm init        # the module my_library/hcm.py
-npx --no my-lib-hcm init             # the bin command my-lib-hcm of the package
+python -m my_library hcm install -t claude-code   # my_library/__main__.py calls my_library/hcm.py
+npx --no my-lib-hcm install -t claude-code        # the bin command my-lib-hcm of the package
 ```
 
 - Run the entry point in the environment of the project: `.venv/bin/python`, `uv run`, `poetry run`, `npx`, `pnpm exec` or `yarn run`.
 - `--no` stops `npx` when the package is not a dependency of the project. Without it, `npx` can download a different package with that name.
-- A Python module name cannot contain `-`. Use the import name: `python -m my_library.hcm`. A `__main__.py` can also accept `python -m my_library hcm init`.
+- A Python module name cannot contain `-`. Use the import name: `python -m my_library`.
 
-The entry point has two commands:
+The `install` command does not register the bundle. Each project can pin its own
+version of the library, and one registry entry cannot serve two versions. So the
+command installs the bundle from the environment of the current project:
 
-| Command | Effect |
-| --- | --- |
-| `init` | Registers the bundle for the user, as the CLI strategy does. Then `hcm install my-lib` and `hcm update` work in each project. |
-| `install -t <harness...>` | Installs the bundle of this package version into the current project only. Use it when projects of one user pin different versions of the library. |
+1. If the bundle is installed in the project already, it runs `hcm update my-lib --from <bundle-folder> -t <harness...>`. The installations then follow the folder of this environment.
+2. Else it runs `hcm install <bundle-folder> --track source -t <harness...>`.
 
-The `install` command removes the old version first, then installs from the
-package folder. A second `hcm install` over an installed bundle does not remove
-the files that the new version deleted. `hcm update` does not update this
-installation, so run `install` again after each upgrade of the library.
+The installation follows that folder. After each upgrade of the library, run
+`hcm update` in the project. hcm reads the folder again, and does not read the
+registry for this bundle. If the registry has a different version of the same
+bundle, hcm warns, and `hcm list --installed` marks the installation `[source]`.
+
+A folder inside the project, for example in `.venv/` or `node_modules/`, is
+also recorded relative to the project. A teammate's checkout then reads its own
+environment.
+
+The entry point can also supply `init`, which registers the bundle as the CLI
+strategy does. Supply it only if the library is also installed one time per
+machine, for example with `pipx install`.
+
+### Upgrade an older library integration
+
+An older library integration registers the bundle with `init`, or removes and
+installs the bundle again after each upgrade. To change it, and to move the
+projects of its users, follow
+[`migrate.md`](../builtin/hcm/skills/hcm-integration/migrate.md). In short:
+
+1. In the entry point, check that `hcm install --help` contains `--track`.
+2. Make `install` run `hcm update <bundle> --from <bundle-folder>` where the bundle is installed, and `hcm install <bundle-folder> --track source` elsewhere. Remove the call to `hcm uninstall`.
+3. Keep `init` only for an install one time for each machine. Keep the old meaning of `remove`, and add `uninstall` for the project.
+4. Tell users to run the `install` command one time in each project, and then `hcm update` after each upgrade.
 
 ## A separate download
 
@@ -105,8 +135,12 @@ command:
 ```bash
 my-cli hcm init --dev                     # the bundle folder beside the code that runs
 my-cli hcm init --dev ./hcm-bundle        # or a path; mandatory for a single binary
-python -m my_library.hcm init --dev       # the same option for a library
 ```
+
+A library needs no `--dev` option. Install the library from the checkout
+(`pip install -e .`, `npm link`), and run its `install` command in each test
+project. The installation then follows the bundle folder of the checkout, and
+`hcm update` in the test project reads each edit.
 
 This runs `hcm registry add <folder> --dev`. hcm then reads the working copy in
 place, with no stored copy. The entry keeps its name and id, so the test

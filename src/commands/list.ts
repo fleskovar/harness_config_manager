@@ -4,6 +4,7 @@ import { describeSource } from '../core/github.js';
 import { color, log } from '../core/logger.js';
 import { availableEntries, liveEntries } from '../core/registry.js';
 import { readState } from '../core/state.js';
+import { describeRecordedSource, effectiveTrack } from '../core/tracking.js';
 import type { InstallationRecord, RegistryEntry, Scope } from '../core/types.js';
 
 export interface ListOptions {
@@ -103,6 +104,13 @@ async function listInstalled(options: ListOptions): Promise<void> {
     return;
   }
 
+  // Registered versions by name, to show where `hcm update` reads each one
+  // and when a pinned source has drifted from the registry.
+  const registered = new Map<string, RegistryEntry>();
+  for (const entry of await availableEntries()) {
+    if (!registered.has(entry.name)) registered.set(entry.name, entry);
+  }
+
   for (const scope of scopes) {
     const scoped = rows.filter((record) => record.scope === scope);
     if (scoped.length === 0) continue;
@@ -121,10 +129,21 @@ async function listInstalled(options: ListOptions): Promise<void> {
       const part = record.flavors?.length
         ? color.yellow(` [${record.flavors.join(', ')}]`)
         : '';
+      // Where `hcm update` reads the next version, when that is not the registry.
+      const entry = registered.get(record.bundle);
+      const follows = !entry?.builtin && effectiveTrack(record, entry !== undefined) === 'source';
+      const mode = follows ? color.magenta(' [source]') : '';
       log.plain(
-        `  ${color.green('●')} ${color.bold(record.bundle)} ${color.dim(`v${record.version}`)}${why}${part} ` +
+        `  ${color.green('●')} ${color.bold(record.bundle)} ${color.dim(`v${record.version}`)}${why}${part}${mode} ` +
           `→ ${record.target} ${color.dim(`· ${record.receipts.length} item(s) · ${when}`)}${needs}`,
       );
+      if (follows) {
+        const gap =
+          entry?.version && entry.version !== record.version
+            ? color.yellow(` · the registry has v${entry.version}`)
+            : '';
+        log.plain(`      ${color.dim(`follows ${describeRecordedSource(record)}`)}${gap}`);
+      }
       // The values its templates were rendered with, and what `hcm update`
       // will render the next version with unless it is told otherwise.
       const parameters = Object.entries(record.parameters ?? {});

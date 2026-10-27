@@ -23,8 +23,8 @@ options.
 
 | Command | What it does |
 | --- | --- |
-| `hcm install <bundle...>` | Install bundles, and the bundles that they require. Also `--no-deps`, `--refresh`, `--pi-subagents`. |
-| `hcm update [<bundle...>\|all]` | Read the bundles from their source again. Install each new version where the old version is. No argument: the bundles of this project. `all`: all registered bundles. `--reconfigure` asks for the parameters again. |
+| `hcm install <bundle...>` | Install bundles, and the bundles that they require. Also `--no-deps`, `--refresh`, `--pi-subagents`. `--track registry\|source` sets where `hcm update` reads the next version. |
+| `hcm update [<bundle...>\|all]` | Read each bundle again, from the registry or from its source. Install each new version where the old version is. No argument: the bundles of this project. `all`: these, and all registered bundles. `--reconfigure` asks for the parameters again. `--no-registry` reads the recorded sources this time, with no change to the registry. `--track registry\|source` changes the mode. `--from <path\|url>` reads a new source, and follows it from now on. |
 | `hcm uninstall <bundle...>` | Remove exactly what hcm installed. Also `--cascade`, `--ignore-dependents`, `--keep-orphans`. |
 
 ## Inspect

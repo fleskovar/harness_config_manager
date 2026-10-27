@@ -1,6 +1,6 @@
 /**
- * `hcm update` — re-read a registered bundle from its origin, then put the new
- * version wherever the old one was.
+ * `hcm update` — read a new version of each installed bundle, then put it
+ * wherever the old one was.
  *
  * Reinstalling is rollback-then-install rather than write-over-the-top, because
  * a new version is defined as much by what it *removed* as by what it changed:
@@ -8,22 +8,30 @@
  * hand-edited since install still block the way they do for `hcm uninstall`,
  * so an update never silently discards local changes.
  *
+ * Each installation follows either the registry or its own source -- see
+ * `core/tracking.ts`. A registry installation is updated by refreshing the
+ * registered bundle, then reinstalling it. A source installation is updated by
+ * reading its recorded source again; the registry is not read or written.
+ *
  * Three ways to say what to update, and the difference between the last two
  * matters:
  *
  *   hcm update <bundle>  one bundle
  *   hcm update           everything installed here -- the working default
- *   hcm update all       every *registered* bundle, installed here or not
+ *   hcm update all       everything installed here, and every *registered*
+ *                        bundle, installed here or not
  */
 
+import { loadBundle } from '../core/bundle.js';
 import type { ConflictPolicy, Resolution } from '../core/conflicts.js';
 import {
   type DependencyGraph,
   installedDependencies,
   resolveDependencyGraph,
 } from '../core/deps.js';
-import { loadBundle } from '../core/bundle.js';
+import { HcmError } from '../core/errors.js';
 import { assertFlavorsAvailable, expandFlavors } from '../core/flavors.js';
+import { describeSource, resolveSource } from '../core/github.js';
 import { expandTargets, requireTargetChoice } from '../core/harnesses.js';
 import { color, log } from '../core/logger.js';
 import {
@@ -33,17 +41,34 @@ import {
   parseAssignments,
   readParametersFile,
 } from '../core/parameters.js';
-import { asList, availableEntries, entryDir, refreshEntry, requireEntry } from '../core/registry.js';
-import { entryMode } from './list.js';
+import {
+  asList,
+  availableEntries,
+  entryDir,
+  loadBundlesFrom,
+  matchEntry,
+  parseSource,
+  refreshEntry,
+} from '../core/registry.js';
 import { findInstallation, readState } from '../core/state.js';
+import {
+  describeRecordedSource,
+  effectiveTrack,
+  recordedSource,
+  sameOrigin,
+  warnIfRegistryDiffers,
+} from '../core/tracking.js';
 import type {
+  BundleSource,
   InstallationRecord,
   InstalledDependency,
   LoadedBundle,
   RegistryEntry,
   Scope,
   TargetOptions,
+  TrackMode,
 } from '../core/types.js';
+import { entryMode } from './list.js';
 import { installBundle, installInto, logTargetHeader } from './install.js';
 import { rollbackInstallation } from './uninstall.js';
 
@@ -88,12 +113,29 @@ export interface UpdateOptions {
    * is how you widen a narrowed installation back to the whole bundle.
    */
   flavors?: string[];
+  /**
+   * `--no-registry` (false): read each installation that follows the registry
+   * from the source it recorded instead, this time only. The registry and the
+   * store do not change.
+   */
+  registry?: boolean;
+  /**
+   * `--track`: switch the installations this run touches to this mode, and
+   * record it. See `core/tracking.ts`.
+   */
+  track?: TrackMode;
+  /**
+   * `--from`: read the bundle from this source, and follow that source from
+   * now on. For a virtual environment that moved, or for a project that stops
+   * following the registry.
+   */
+  from?: string;
   cwd: string;
 }
 
 /**
- * No argument updates everything installed here; `all` updates everything
- * registered; anything else names bundles -- one, or as many as you like.
+ * No argument updates everything installed here; `all` also refreshes every
+ * registered bundle; anything else names bundles -- one, or as many as you like.
  */
 export async function updateCommand(
   references: string | string[] | undefined,
@@ -101,6 +143,7 @@ export async function updateCommand(
 ): Promise<void> {
   const wanted = references === undefined ? undefined : asList(references);
   const chosen = expandTargets(options.targets);
+  assertTrackingFlags(options);
 
   // Read up front, so a malformed assignment stops the run before the first
   // bundle has been rolled back and reinstalled.
@@ -118,23 +161,33 @@ export async function updateCommand(
     ...(options.flavors === undefined ? {} : { flavors: expandFlavors(options.flavors) ?? [] }),
   };
   await assertTargetChosen(wanted, chosen, options);
-  const selection = await select(wanted, options);
+  const plan = await planUpdate(wanted, options);
 
-  if (selection.entries.length === 0) {
-    reportEmpty(selection, options);
+  if (plan.jobs.length === 0) {
+    reportEmpty(plan, options);
     return;
   }
 
-  // Said once, before the run, so a long update does not bury it: these are
-  // installed here but have nowhere to be re-read from.
-  for (const name of selection.unregistered) {
-    log.warn(`${name} is installed here but not registered; nothing to update it from`);
-    log.warn(color.dim(`  register its source with: hcm registry add <path|url|owner/repo>`));
-  }
-
-  for (const [index, entry] of selection.entries.entries()) {
+  for (const [index, job] of plan.jobs.entries()) {
     if (index > 0) log.plain('');
-    await updateOne(entry, options);
+    if (job.kind === 'registry') await updateFromRegistry(job, options);
+    else await updateFromSource(job, options);
+  }
+}
+
+/** Refuse the flag combinations that contradict each other. */
+function assertTrackingFlags(options: UpdateOptions): void {
+  if (options.from !== undefined && options.track === 'registry') {
+    throw new HcmError(
+      '--from and --track registry contradict each other',
+      '--from makes the installation follow that source. Use one of the two.',
+    );
+  }
+  if (options.registry === false && options.track === 'registry') {
+    throw new HcmError(
+      '--no-registry and --track registry contradict each other',
+      'Use --track registry to follow the registry, or --no-registry to read the sources once.',
+    );
   }
 }
 
@@ -170,94 +223,276 @@ async function assertTargetChosen(
   }
 }
 
-interface Selection {
-  entries: RegistryEntry[];
-  /** Installed here, but with no registry entry to re-read them from. */
-  unregistered: string[];
+// ---------------------------------------------------------------------------
+// Planning: which installations, and where each one reads its next version
+// ---------------------------------------------------------------------------
+
+/** Refresh a registered bundle, then reinstall it where these records are. */
+interface RegistryJob {
+  kind: 'registry';
+  entry: RegistryEntry;
+  /** Empty when the bundle is not installed here: the refresh is all there is. */
+  records: InstallationRecord[];
+  /** Record this mode on each reinstalled installation. */
+  switchTo?: TrackMode;
+}
+
+/** Read one source, then reinstall it where these records are. */
+interface SourceJob {
+  kind: 'source';
+  /** The manifest name the records were installed under. */
+  bundle: string;
+  source: BundleSource;
+  records: InstallationRecord[];
+  switchTo?: TrackMode;
+  /** Already read, by `--from`. */
+  loaded?: LoadedBundle;
+  /** Follows the registry, read from its source this time only. */
+  once?: boolean;
+}
+
+type UpdateJob = RegistryJob | SourceJob;
+
+interface UpdatePlan {
+  jobs: UpdateJob[];
   /** Whether the selection came from the ledger rather than from a name. */
   fromLedger: boolean;
 }
 
 /**
- * "all" is a literal, not a name -- but a bundle actually called `all` (or with
- * `all` as its id) wins, so nobody is locked out of their own bundle. The same
- * courtesy is why no argument means "what is installed" rather than "all":
- * refreshing a registered bundle that is not installed anywhere does nothing
- * useful, and in a project with a large registry it is a lot of nothing.
+ * Decide what to update, and where each installation reads its next version.
  *
- * Several names select several entries, in registry order rather than the order
- * they were typed, so `hcm update 3 1` and `hcm update 1 3` walk the same
- * bundles in the same sequence. A bundle named twice is updated once.
+ * Bundles are picked by name, by id, by `all`, or -- with no argument -- from
+ * the ledger. Each installation picked is then a registry job or a source job,
+ * by its mode (see `core/tracking.ts`), after `--track`, `--from` and
+ * `--no-registry`.
+ *
+ * Registry jobs come in registry order, so `hcm update 3 1` and `hcm update 1
+ * 3` walk the same bundles in the same sequence. Source jobs follow, by name.
+ * A bundle named twice is updated once.
  */
-async function select(
+async function planUpdate(
   references: string[] | undefined,
   options: UpdateOptions,
-): Promise<Selection> {
+): Promise<UpdatePlan> {
   const available = await availableEntries();
+  const records = await installations(options);
+  const registered = await registryIndex(
+    available,
+    new Set(records.map((record) => record.bundle)),
+  );
 
-  if (references !== undefined && references.length > 0) {
-    const selected = new Map<string, RegistryEntry>();
+  if (options.from !== undefined) {
+    return { jobs: [await planFrom(options.from, references, records, available, options)], fromLedger: false };
+  }
 
-    for (const reference of references) {
-      const named = available.find(
-        (entry) => entry.name === reference || entry.id === reference,
-      );
-      if (named) {
-        selected.set(named.id, named);
-        continue;
-      }
-      if (reference === 'all') {
-        for (const entry of available) selected.set(entry.id, entry);
-        continue;
-      }
-      const found = await requireEntry(reference);
-      selected.set(found.id, found);
+  const picked = pickRecords(references, records, available, registered);
+  const registryJobs = new Map<string, RegistryJob>();
+  const sourceJobs = new Map<string, SourceJob>();
+
+  for (const entry of picked.entries) {
+    registryJobs.set(entry.id, { kind: 'registry', entry, records: [] });
+  }
+
+  for (const record of picked.records) {
+    const entry = registered.get(record.bundle);
+    const mode = modeFor(record, entry, options);
+
+    if (mode === 'registry' && entry && options.registry !== false) {
+      const job = registryJobs.get(entry.id) ?? { kind: 'registry', entry, records: [] };
+      job.records.push(record);
+      if (options.track) job.switchTo = options.track;
+      registryJobs.set(entry.id, job);
+      continue;
     }
 
-    const entries = available.filter((entry) => selected.has(entry.id));
-    return { entries, unregistered: [], fromLedger: false };
+    const source = recordedSource(record, options.cwd);
+    const key = `${record.bundle}::${JSON.stringify(source)}`;
+    const job: SourceJob = sourceJobs.get(key) ?? {
+      kind: 'source',
+      bundle: record.bundle,
+      source,
+      records: [],
+      ...(mode === 'registry' ? { once: true } : {}),
+    };
+    job.records.push(record);
+    if (options.track) job.switchTo = options.track;
+    sourceJobs.set(key, job);
   }
 
-  const installed = new Set((await installations(options)).map((record) => record.bundle));
-
-  // Registry order, not ledger order, so `hcm update` and `hcm update all`
-  // walk the same bundles in the same sequence.
-  const entries = available.filter((entry) => installed.has(entry.name));
-  const claimed = new Set(entries.map((entry) => entry.name));
-
-  for (const entry of await aliasedEntries(available, installed, claimed)) {
-    entries.push(entry);
-  }
-  entries.sort((a, b) => available.indexOf(a) - available.indexOf(b));
-
-  const unregistered = [...installed].filter((name) => !claimed.has(name)).sort();
-  return { entries, unregistered, fromLedger: true };
+  const order = (entry: RegistryEntry): number => available.indexOf(entry);
+  const jobs: UpdateJob[] = [
+    ...[...registryJobs.values()].sort((a, b) => order(a.entry) - order(b.entry)),
+    ...[...sourceJobs.values()].sort((a, b) => a.bundle.localeCompare(b.bundle)),
+  ];
+  return { jobs, fromLedger: picked.fromLedger };
 }
 
 /**
- * Entries whose *manifest* name is installed, when their *registry* name is not.
+ * The mode one installation is updated in, this run.
  *
- * `registry add --name` renames the entry, not the bundle, so an alias records
- * its installation under the manifest name and a name match alone would miss
- * it -- and then report it as unregistered, which is worse than missing it.
- * The real name is only written down inside the bundle, so read it from the
- * copy already on disk: no refresh, no network, and only for the entries a name
- * match did not already account for. An unreadable copy is skipped rather than
- * thrown from, since one broken entry must not stop the other updates.
- *
- * `claimed` is extended in place, so the caller's "installed but not
- * registered" list stays correct.
+ * A built-in bundle has no source apart from the hcm that runs, so it always
+ * follows the registry. `--track registry` on a bundle that is not registered
+ * has nothing to follow, and is refused.
  */
-async function aliasedEntries(
+function modeFor(
+  record: InstallationRecord,
+  entry: RegistryEntry | undefined,
+  options: UpdateOptions,
+): TrackMode {
+  if (entry?.builtin) return 'registry';
+
+  if (options.track === 'registry' && !entry) {
+    throw new HcmError(
+      `"${record.bundle}" is not registered, so it cannot follow the registry`,
+      'Register it with "hcm registry add <path|url>" first.',
+    );
+  }
+
+  const mode = options.track ?? effectiveTrack(record, entry !== undefined);
+  // A record that chose the registry, whose bundle was unregistered since,
+  // still has its own source to read.
+  if (mode === 'registry' && !entry) {
+    log.warn(`${record.bundle} follows the registry, but it is not registered any more`);
+    log.warn(color.dim(`  reading the source it was installed from: ${describeRecordedSource(record)}`));
+    return 'source';
+  }
+  return mode;
+}
+
+/**
+ * The installations and registry entries that the references name.
+ *
+ * A name picks the installations of that bundle here. It picks the registry
+ * entry only when the bundle is registered and not installed here in this
+ * scope: then refreshing the registered copy is all an update can do. A bundle
+ * that is installed here only as a pinned source does not touch the registry.
+ */
+function pickRecords(
+  references: string[] | undefined,
+  records: InstallationRecord[],
+  available: RegistryEntry[],
+  registered: Map<string, RegistryEntry>,
+): { records: InstallationRecord[]; entries: RegistryEntry[]; fromLedger: boolean } {
+  if (references === undefined || references.length === 0) {
+    return { records, entries: [], fromLedger: true };
+  }
+
+  const pickedRecords = new Set<InstallationRecord>();
+  const pickedEntries = new Set<RegistryEntry>();
+  const installed = new Set(records.map((record) => record.bundle));
+
+  for (const reference of references) {
+    // "all" is a literal, not a name -- but a bundle actually called `all`
+    // (or with `all` as its id) wins, so nobody is locked out of their own
+    // bundle.
+    const named = available.find((entry) => entry.name === reference || entry.id === reference);
+    if (reference === 'all' && !named && !installed.has(reference)) {
+      for (const record of records) pickedRecords.add(record);
+      for (const entry of available) pickedEntries.add(entry);
+      continue;
+    }
+
+    const entry = named ?? matchEntry(available, reference);
+    const matches = records.filter(
+      (record) => record.bundle === reference || (entry && registered.get(record.bundle) === entry),
+    );
+
+    if (matches.length === 0 && !entry) {
+      throw new HcmError(
+        `"${reference}" is not installed here, and it is not a registered bundle`,
+        installed.size > 0
+          ? `Installed here: ${[...installed].sort().join(', ')}`
+          : 'Nothing is installed in this scope. Try "hcm install <bundle>".',
+      );
+    }
+
+    for (const record of matches) pickedRecords.add(record);
+    if (matches.length === 0 && entry) pickedEntries.add(entry);
+  }
+
+  // A picked entry and the registry installations of its bundle share one job,
+  // so the registered copy is refreshed once.
+  return {
+    records: records.filter((record) => pickedRecords.has(record)),
+    entries: [...pickedEntries],
+    fromLedger: false,
+  };
+}
+
+/**
+ * `--from <source>`: read the bundle there, and make each installation of it
+ * follow that source. The source holds one bundle, and that bundle has to be
+ * installed here already -- `hcm install --track source` is for a first
+ * install.
+ */
+async function planFrom(
+  from: string,
+  references: string[] | undefined,
+  records: InstallationRecord[],
+  available: RegistryEntry[],
+  options: UpdateOptions,
+): Promise<SourceJob> {
+  const source = parseSource(from, options.cwd);
+  const bundles = await loadBundlesFrom(source, {
+    refresh: true,
+    ...(options.fetched ? { fetched: options.fetched } : {}),
+  });
+
+  if (bundles.length > 1) {
+    throw new HcmError(
+      `--from needs one bundle, but ${from} contains ${bundles.length}`,
+      `Name the folder of one of: ${bundles.map((bundle) => bundle.manifest.name).join(', ')}`,
+    );
+  }
+
+  const bundle = bundles[0] as LoadedBundle;
+  const name = bundle.manifest.name;
+
+  for (const reference of references ?? []) {
+    const meant = matchEntry(available, reference)?.name ?? reference;
+    if (meant !== name) {
+      throw new HcmError(
+        `--from ${from} holds the bundle "${name}", not "${reference}"`,
+        `Run "hcm update ${name} --from ${from}", or name no bundle.`,
+      );
+    }
+  }
+
+  const matches = records.filter((record) => record.bundle === name);
+  if (matches.length === 0) {
+    throw new HcmError(
+      `"${name}" is not installed here, so there is nothing to update`,
+      `Install it with: hcm install ${from} --track source`,
+    );
+  }
+
+  return { kind: 'source', bundle: name, source: bundle.source, records: matches, switchTo: 'source', loaded: bundle };
+}
+
+/**
+ * The registry entry each installed bundle name belongs to.
+ *
+ * Mostly a name match. `registry add --name` renames the entry, not the
+ * bundle, so an alias records its installation under the manifest name, and a
+ * name match alone would miss it. The real name is only written down inside
+ * the bundle, so read it from the copy already on disk: no refresh, no network,
+ * and only for the names that a name match did not already account for. An
+ * unreadable copy is skipped rather than thrown from, since one broken entry
+ * must not stop the other updates.
+ */
+async function registryIndex(
   entries: RegistryEntry[],
   installed: Set<string>,
-  claimed: Set<string>,
-): Promise<RegistryEntry[]> {
-  if ([...installed].every((name) => claimed.has(name))) return [];
-
-  const matched: RegistryEntry[] = [];
+): Promise<Map<string, RegistryEntry>> {
+  const index = new Map<string, RegistryEntry>();
   for (const entry of entries) {
-    if (claimed.has(entry.name)) continue;
+    if (installed.has(entry.name) && !index.has(entry.name)) index.set(entry.name, entry);
+  }
+  if ([...installed].every((name) => index.has(name))) return index;
+
+  for (const entry of entries) {
+    if (index.has(entry.name)) continue;
 
     let name: string;
     try {
@@ -267,11 +502,9 @@ async function aliasedEntries(
       continue;
     }
 
-    if (!installed.has(name) || claimed.has(name)) continue;
-    claimed.add(name);
-    matched.push(entry);
+    if (installed.has(name) && !index.has(name)) index.set(name, entry);
   }
-  return matched;
+  return index;
 }
 
 /**
@@ -292,51 +525,35 @@ async function collectOverrides(options: UpdateOptions): Promise<ParameterOverri
 }
 
 /** Nothing to do -- say which "nothing" this is, since the fixes differ. */
-function reportEmpty(selection: Selection, options: UpdateOptions): void {
-  if (!selection.fromLedger) {
+function reportEmpty(plan: UpdatePlan, options: UpdateOptions): void {
+  if (!plan.fromLedger) {
     log.info('No bundles registered.');
     log.info(color.dim('Add one with: hcm registry add <path|url|owner/repo>'));
     return;
   }
 
-  for (const name of selection.unregistered) {
-    log.warn(`${name} is installed here but not registered; nothing to update it from`);
-  }
-
-  if (selection.unregistered.length === 0) {
-    log.info(`No bundles installed in ${scopesOf(options).join(' or ')} scope.`);
-    log.info(color.dim('Install one with: hcm install <bundle>'));
-  }
-
+  log.info(`No bundles installed in ${scopesOf(options).join(' or ')} scope.`);
+  log.info(color.dim('Install one with: hcm install <bundle>'));
   log.info(color.dim('"hcm update all" refreshes every registered bundle.'));
 }
 
-async function updateOne(entry: RegistryEntry, options: UpdateOptions): Promise<void> {
-  const { entry: updated, bundle, previousVersion } = await refreshEntry(entry, {
+// ---------------------------------------------------------------------------
+// Running one job
+// ---------------------------------------------------------------------------
+
+/** Refresh a registered bundle, then reinstall it wherever its records are. */
+async function updateFromRegistry(job: RegistryJob, options: UpdateOptions): Promise<void> {
+  const { entry: updated, bundle, previousVersion } = await refreshEntry(job.entry, {
     dryRun: options.dryRun ?? false,
     ...(options.fetched ? { fetched: options.fetched } : {}),
   });
 
-  const version =
-    previousVersion && previousVersion !== bundle.manifest.version
-      ? `${color.dim(`v${previousVersion}`)} → ${color.bold(`v${bundle.manifest.version}`)}`
-      : color.dim(`v${bundle.manifest.version} (unchanged)`);
-
   log.info(
-    `${color.dim(`[${updated.id}]`)} ${color.bold(updated.name)} ${version}` +
-      entryMode(updated),
+    `${color.dim(`[${updated.id}]`)} ${color.bold(updated.name)} ` +
+      `${describeVersion(previousVersion, bundle.manifest.version)}${entryMode(updated)}`,
   );
 
-  // A `--flavor` this bundle does not have is refused here rather than left to
-  // narrow the install to nothing. `hcm update all` can name bundles that have
-  // no flavors at all, so this only applies where one was asked for.
-  if (options.flavors?.length) assertFlavorsAvailable([bundle], options.flavors);
-
-  // Installations are keyed by the manifest name, which `registry add --name`
-  // can differ from -- the alias is a registry convenience, not a rename.
-  const records = await installedRecords(bundle.manifest.name, options);
-
-  if (records.length === 0) {
+  if (job.records.length === 0) {
     log.info(
       color.dim(
         options.dryRun
@@ -346,6 +563,95 @@ async function updateOne(entry: RegistryEntry, options: UpdateOptions): Promise<
     );
     return;
   }
+
+  // An installation that came from another place is moved onto the registered
+  // copy now. That is what following the registry means, but it is worth one
+  // line: the user can pin the old source instead.
+  for (const record of job.records) {
+    if (record.track || sameOrigin(record.source, bundle.source)) continue;
+    log.info(
+      color.dim(
+        `  ${record.target}: installed from ${describeRecordedSource(record)}; ` +
+          'now from the registry (keep that source with --track source)',
+      ),
+    );
+  }
+
+  await reinstallAll(bundle, job.records, job.switchTo, options);
+}
+
+/**
+ * Read a source again, then reinstall it wherever its records are. The
+ * registry is not read or written, apart from a warning when it holds another
+ * version of the same bundle.
+ *
+ * A source that cannot be read is reported, and the run goes on: a deleted
+ * virtual environment in one project must not stop every other update.
+ */
+async function updateFromSource(job: SourceJob, options: UpdateOptions): Promise<void> {
+  let bundle: LoadedBundle;
+  try {
+    bundle = job.loaded ?? (await loadBundle(
+      await resolveSource(job.source, {
+        refresh: true,
+        ...(options.fetched ? { fetched: options.fetched } : {}),
+      }),
+      job.source,
+    ));
+  } catch (error) {
+    if (!(error instanceof HcmError)) throw error;
+    log.error(`${color.bold(job.bundle)} ${error.message}`);
+    log.info(
+      color.dim(
+        `  point it at where the bundle is now: hcm update ${job.bundle} --from <path|url>`,
+      ),
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  if (bundle.manifest.name !== job.bundle) {
+    log.error(
+      `${color.bold(job.bundle)} ${describeSource(job.source)} now holds the bundle ` +
+        `"${bundle.manifest.name}", not "${job.bundle}"`,
+    );
+    log.info(color.dim(`  point it at the right folder: hcm update ${job.bundle} --from <path|url>`));
+    process.exitCode = 1;
+    return;
+  }
+
+  const previous = job.records[0]?.version;
+  const mode = job.once ? color.dim(' [source, this time]') : color.magenta(' [source]');
+  log.info(
+    `${color.bold(job.bundle)} ${describeVersion(previous, bundle.manifest.version)}${mode}`,
+  );
+  log.info(color.dim(`  from ${describeSource(bundle.source)}`));
+  await warnIfRegistryDiffers(bundle);
+
+  await reinstallAll(bundle, job.records, job.switchTo, options);
+}
+
+/** "v1.0.0 → v1.1.0", or "v1.0.0 (unchanged)". */
+function describeVersion(previous: string | undefined, current: string): string {
+  return previous && previous !== current
+    ? `${color.dim(`v${previous}`)} → ${color.bold(`v${current}`)}`
+    : color.dim(`v${current} (unchanged)`);
+}
+
+/**
+ * Put one new version in place of the old one, in each of its installations,
+ * after the dependencies that it gained.
+ */
+async function reinstallAll(
+  bundle: LoadedBundle,
+  records: InstallationRecord[],
+  switchTo: TrackMode | undefined,
+  options: UpdateOptions,
+): Promise<void> {
+  // A `--flavor` this bundle does not have is refused here rather than left to
+  // narrow the install to nothing. `hcm update all` can name bundles that have
+  // no flavors at all, so this only applies where one was asked for.
+  if (options.flavors?.length) assertFlavorsAvailable([bundle], options.flavors);
 
   // A new version can require something the old one did not. Those bundles are
   // installed first, exactly as `hcm install` would have done, so the reinstall
@@ -366,7 +672,7 @@ async function updateOne(entry: RegistryEntry, options: UpdateOptions): Promise<
 
   for (const record of records) {
     logTargetHeader(record.target, { scope: record.scope, cwd: options.cwd });
-    await reinstall(record, bundle, graph, options);
+    await reinstall(record, bundle, graph, switchTo ?? record.track, options);
   }
 }
 
@@ -442,11 +748,16 @@ async function installNewDependencies(
   }
 }
 
-/** Replace one installation with the refreshed bundle. */
+/**
+ * Replace one installation with the refreshed bundle. `track` is the mode to
+ * record: the rollback below takes the old record away, so it is handed over,
+ * like the parameters and the renames.
+ */
 async function reinstall(
   record: InstallationRecord,
   bundle: LoadedBundle,
   graph: DependencyGraph,
+  track: TrackMode | undefined,
   options: UpdateOptions,
 ): Promise<void> {
   const rolledBack = await rollbackInstallation(record, {
@@ -501,6 +812,7 @@ async function reinstall(
       // An update does not change why a bundle is here, only what it holds.
       ...(record.auto ? { auto: true } : {}),
       dependencies: resolvedDependencies(record, bundle, graph),
+      ...(track ? { track } : {}),
     },
   );
 }
@@ -519,14 +831,6 @@ function resolvedDependencies(
   const resolved = installedDependencies(bundle, graph);
   if (resolved.length > 0 || bundle.dependencies.length === 0) return resolved;
   return record.dependencies ?? [];
-}
-
-/** Every installation of a bundle, filtered by the requested scopes and targets. */
-async function installedRecords(
-  bundle: string,
-  options: UpdateOptions,
-): Promise<InstallationRecord[]> {
-  return (await installations(options)).filter((record) => record.bundle === bundle);
 }
 
 /** The scopes this run covers. Omitted means both, as it does for `hcm list`. */

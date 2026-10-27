@@ -1,0 +1,11 @@
+{
+  "describes": "an installation pinned to its source updates from that source, and ignores the registered version of the same bundle",
+  "recordState": true,
+  "steps": [
+    { "register": "my-lib-global" },
+    { "install": "my-lib-venv", "targets": ["claude-code"], "track": "source" },
+    { "replaceBundle": "my-lib-venv", "with": "my-lib-venv-v2-1" },
+    { "replaceBundle": "my-lib-global", "with": "my-lib-global-v1-5" },
+    { "update": "my-lib" }
+  ]
+}

@@ -1,5 +1,5 @@
 ---
-description: Install, update and remove hcm bundles in a project or for the user, and check the result. Also manage the hcm registry. Use when the user asks to add skills, subagents, commands, rules or MCP servers with hcm, or to change what hcm installed. Also use it to register, group or unregister bundles, for example all bundles of one repository or named collection.
+description: Install, update and remove hcm bundles in a project or for the user, and check the result. Also decide if an installation follows the registry or its own source, for example a library bundle in .venv or node_modules, and repair an update whose source moved. Also manage the hcm registry. Use when the user asks to add skills, subagents, commands, rules or MCP servers with hcm, or to change what hcm installed. Also use it to register, group or unregister bundles, for example all bundles of one repository or named collection.
 ---
 
 # Use hcm
@@ -17,6 +17,7 @@ exact options of the installed version, run `hcm <command> --help`.
 1. Run `hcm --version`. If the command is not found, tell the user to install hcm with `npm install -g harness-config-manager`.
 2. Run `hcm targets`. The output shows the harnesses that this folder uses, and the files that two harnesses share.
 3. Run `hcm list`. The output shows the bundles that you can install, with their ids. A `●` marks a bundle that is installed.
+4. Run `hcm list --installed`. The output shows the bundles of this project. A `[source]` mark shows a bundle that `hcm update` reads from its own folder or repository, not from the registry.
 
 The npm package name is `harness-config-manager`. The npm package `hcm` is a
 different program.
@@ -82,9 +83,44 @@ the latest edits.
 | Get the latest version of the registered bundles from their sources, without a change to a project | `hcm registry update` |
 | Install the new version of each bundle in this project | `hcm update -t <harness> --no-prompt` |
 | Install the new version of one bundle | `hcm update <bundle> -t <harness> --no-prompt` |
+| Install the new version from the recorded sources, with no change to the registry | `hcm update --no-registry -t <harness> --no-prompt` |
+| Install a bundle that must follow its own folder, for example a library in `.venv/` | `hcm install <folder> --track source -t <harness> --no-prompt` |
+| Point an installation at a new folder, for example after the `.venv/` moved | `hcm update <bundle> --from <folder> -t <harness> --no-prompt` |
+| Make an installation follow the registry again | `hcm update <bundle> --track registry -t <harness> --no-prompt` |
 | Remove a bundle, and the dependencies that no other bundle needs | `hcm uninstall <bundle> -t <harness>` |
 | Unregister a bundle | `hcm registry remove <bundle>` |
 | Unregister each bundle of a named collection, for example each bundle of one repository | `hcm registry remove --collection <name>`. See [Remove a named collection](#remove-a-named-collection). |
+
+Each installation follows the registry or its source. `hcm update` reads the
+next version from there:
+
+- An installation made by name or id follows the registry.
+- An installation made with `--track source` follows its folder or repository. `hcm update` does not read the registry for it. Libraries use this mode, because each project can pin another version.
+- With no `--track`, an installation from a path follows the registry if a bundle with that name is registered. Else it follows the path.
+- `hcm list --installed` marks a source installation `[source]`. It also shows the registered version when the two versions are different. Tell the user about a different version. Do not change the mode without the agreement of the user.
+
+### A library that follows the environment of the project
+
+Some libraries install their bundle from the environment of the project, for
+example from `.venv/` or `node_modules/`. The library supplies the command, for
+example `python -m my_library hcm install -t <harness>` or
+`npx --no my-lib-hcm install -t <harness>`. Use that command, not
+`hcm install <name>`. A registered bundle of the same name can have another
+version than the library of the project.
+
+After an upgrade of such a library, run `hcm update -t <harness> --no-prompt`.
+
+### When an update fails
+
+| hcm reports | Cause | Do this |
+| --- | --- | --- |
+| `Bundle directory no longer exists` | The source folder moved or is gone, for example after the `.venv/` was made again. | Run the `install` command of the library again. Or run `hcm update <bundle> --from <new-folder> -t <harness> --no-prompt`. |
+| `now holds the bundle "<other>"` | The recorded folder now holds a different bundle. | Find the correct folder, then use `--from`. |
+| `the registry has <bundle> v<x>, but the source has v<y>` | The project pins one version, and the registry has another. This is a warning, not an error. | Tell the user. Change nothing, unless the user asks. |
+| `<bundle> is also registered, from <place>` | The bundle came from a path, and the registry has a bundle of that name from another place. `hcm update` reads the registered copy. | Ask the user which copy the project must follow. For the path, install again with `--track source`. |
+
+hcm continues with the other bundles when one source fails, and exits with
+code 1. Read all of the output.
 
 `hcm update` and `hcm uninstall` do not change an item that somebody edited
 after the install. hcm reports the item as `modified` and stops for that bundle.

@@ -60,7 +60,7 @@ import { loadBundle, validateBundle } from '../src/core/bundle.js';
 import { addToRegistry } from '../src/core/registry.js';
 import { scanReferences } from '../src/core/refs.js';
 import { readState } from '../src/core/state.js';
-import type { InstallationRecord, Scope, StateFile } from '../src/core/types.js';
+import type { InstallationRecord, Scope, StateFile, TrackMode } from '../src/core/types.js';
 
 export const CASES_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'cases');
 export const JSON_INDENT = 2;
@@ -94,6 +94,8 @@ export type CaseStep =
       force?: boolean;
       dryRun?: boolean;
       register?: boolean;
+      /** `--track registry|source`. */
+      track?: TrackMode;
       fails?: boolean;
     }
   /** `hcm update [bundle...]` */
@@ -106,6 +108,12 @@ export type CaseStep =
       reconfigure?: boolean;
       force?: boolean;
       dryRun?: boolean;
+      /** `--track registry|source`. */
+      track?: TrackMode;
+      /** `--from`: a bundle folder under `inputs/bundles/`. */
+      from?: string;
+      /** `--no-registry`. */
+      noRegistry?: boolean;
       fails?: boolean;
     }
   /** `hcm uninstall <bundle...>` */
@@ -249,6 +257,7 @@ async function runStep(step: CaseStep, ctx: RunContext): Promise<void> {
         ...(step.noDeps ? { noDeps: true } : {}),
         ...(step.force ? { force: true } : {}),
         ...(step.dryRun ? { dryRun: true } : {}),
+        ...(step.track ? { track: step.track } : {}),
       }),
     );
     return;
@@ -265,6 +274,9 @@ async function runStep(step: CaseStep, ctx: RunContext): Promise<void> {
         ...(step.reconfigure ? { reconfigure: true } : {}),
         ...(step.force ? { force: true } : {}),
         ...(step.dryRun ? { dryRun: true } : {}),
+        ...(step.track ? { track: step.track } : {}),
+        ...(step.from ? { from: at(step.from) } : {}),
+        ...(step.noRegistry ? { registry: false } : {}),
       }),
     );
     return;
@@ -464,6 +476,8 @@ async function normalisedState(projectDir: string): Promise<unknown> {
           record.source.type === 'local'
             ? { type: 'local', bundle: path.basename(record.source.path) }
             : record.source,
+        ...(record.sourceInProject ? { sourceInProject: record.sourceInProject } : {}),
+        ...(record.track ? { track: record.track } : {}),
         receipts: record.receipts
           .map((receipt) => ({ ...receipt }))
           .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),

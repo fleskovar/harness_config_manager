@@ -80,8 +80,8 @@ to the project between commands:
 
 | Step | Runs |
 | --- | --- |
-| `{ "install": "kit" \| ["a","b"] }` | `hcm install`. Flags: `targets`, `scope`, `flavors`, `params`, `paramsFiles`, `onConflict`, `resolve`, `noDeps`, `force`, `dryRun`, `register` |
-| `{ "update": "kit" \| null }` | `hcm update`; `null` means the bare `hcm update`. Flags: `targets`, `scope`, `flavors`, `params`, `reconfigure`, `force`, `dryRun` |
+| `{ "install": "kit" \| ["a","b"] }` | `hcm install`. Flags: `targets`, `scope`, `flavors`, `params`, `paramsFiles`, `onConflict`, `resolve`, `noDeps`, `force`, `dryRun`, `register`, `track` |
+| `{ "update": "kit" \| null }` | `hcm update`; `null` means the bare `hcm update`. Flags: `targets`, `scope`, `flavors`, `params`, `reconfigure`, `force`, `dryRun`, `track`, `from` (a bundle folder name), `noRegistry` |
 | `{ "uninstall": "kit" }` | `hcm uninstall`. Flags: `targets`, `scope`, `force`, `cascade`, `keepOrphans`, `ignoreDependents`, `dryRun` |
 | `{ "context": "append" \| "override" \| "remove" }` | `hcm context …`. Flags: `bundles`, `targets`, `scope`, `force`, `dryRun` |
 | `{ "validate": "kit" }` | `hcm validate` → `outputs/report.json` |

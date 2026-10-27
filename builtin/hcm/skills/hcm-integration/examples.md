@@ -3,9 +3,13 @@
 Each example registers the bundle with `hcm registry add`, and optionally
 installs it. With `--dev`, it registers the working copy of the bundle with
 `hcm registry add --dev` instead. See
-[Development mode](./cli.md#development-mode). For a library, extend this code
-as [the library strategy](./library.md) shows. Change `my-cli` to the name of your tool. Connect the
-functions to the argument parser of your tool.
+[Development mode](./cli.md#development-mode). Change `my-cli` to the name of
+your tool. Connect the functions to the argument parser of your tool.
+
+A library does not register its bundle by default. It installs the bundle into
+the project, and the installation follows the environment of the project. Copy
+only the helpers from here, for example `hcm` or `_find_hcm`. Then add the
+`install` command of [the library strategy](./library.md).
 
 ## Node.js
 

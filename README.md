@@ -87,7 +87,7 @@ register it. `hcm list` shows it with the mark `[built-in]`.
 | `context/10-hcm.md` | common | Tells the agent that hcm manages the agent configuration of the project. |
 | `skills/hcm-usage/` | common | Find, install, update and remove bundles. Manage the registry, and the named collections in it. |
 | `skills/hcm-bundle-authoring/` | `authoring` | Write, check and publish a bundle or a collection of bundles. Add a collection manifest to an existing collection. |
-| `skills/hcm-integration/` | `integration` | Ship a bundle with a CLI tool (`my-cli hcm init`), with a library (`python -m my_library.hcm init`, `npx --no my-lib-hcm init`), or as a separate download. |
+| `skills/hcm-integration/` | `integration` | Ship a bundle with a CLI tool (`my-cli hcm init`), with a library (`python -m my_library hcm install`, `npx --no my-lib-hcm install`), or as a separate download. Upgrade an older integration, and move the projects of its users. |
 
 To add hcm support to a project, install the bundle there:
 
@@ -123,14 +123,18 @@ There are three strategies:
 
 ```bash
 my-cli hcm init                      # a CLI tool: its subcommand registers the bundle
-python -m my_library.hcm init        # a library: an entry point of the package does the same
-npx --no my-lib-hcm init
+python -m my_library hcm install -t claude-code   # a library: installs the bundle of the project's environment
+npx --no my-lib-hcm install -t claude-code
 hcm registry add owner/repo/hcm-bundle#v1.2.0   # any software: download only the bundle folder
 ```
 
 After the registration, `hcm install my-cli -t claude` installs the bundle like
-any other. A `--dev` option registers the working copy in place, so that
-`hcm update` in each test project picks up each edit.
+any other. A library installs its bundle straight into the project, from the
+virtual environment or `node_modules/`, and does not change the registry. Then
+`hcm update` reads that environment again after each upgrade. See
+[Follow the registry or the source](#follow-the-registry-or-the-source). A
+`--dev` option registers the working copy in place, so that `hcm update` in
+each test project picks up each edit.
 
 [Shipping a bundle with your software](docs/shipping-bundles.md) describes the
 strategies. The `hcm-integration` skill of the built-in bundle contains the same
@@ -1263,8 +1267,8 @@ hcm install my-kit --on-conflict prompt     # ask even where hcm would not have
 
 | Command | What it does |
 | --- | --- |
-| `hcm install <bundle...>` | Install, with whatever it requires. `-t/--target`, `-f/--flavor`, `-s/--scope`, `--param`, `--params-file`, `--no-prompt`, `--dry-run`, `--force`, `--on-conflict`, `--refresh`, `--no-deps`, `--pi-subagents` |
-| `hcm update [<bundle...>\|all]` | Re-read bundles and reinstall them in place. No argument: everything installed here; `all`: everything registered. `-t`, `-f`, `-s`, `--param`, `--params-file`, `--reconfigure`, `--no-prompt`, `--dry-run`, `--force`, `--on-conflict`, `--pi-subagents` |
+| `hcm install <bundle...>` | Install, with whatever it requires. `-t/--target`, `-f/--flavor`, `-s/--scope`, `--param`, `--params-file`, `--no-prompt`, `--dry-run`, `--force`, `--on-conflict`, `--refresh`, `--no-deps`, `--pi-subagents`, `--track registry\|source` |
+| `hcm update [<bundle...>\|all]` | Re-read bundles from the registry or from their sources, and reinstall them in place. No argument: everything installed here; `all`: that, and everything registered. `-t`, `-f`, `-s`, `--param`, `--params-file`, `--reconfigure`, `--no-prompt`, `--dry-run`, `--force`, `--on-conflict`, `--pi-subagents`, `--track registry\|source`, `--from <source>`, `--no-registry` |
 | `hcm uninstall <bundle...>` | Remove exactly what was installed. `-t`, `-s`, `--dry-run`, `--force`, `--cascade`, `--ignore-dependents`, `--keep-orphans` |
 | `hcm list` | Registered bundles (`●` = installed somewhere). `--descriptions`, `--json` |
 | `hcm list --installed` | Installed bundles. `--scope project\|user\|all`, `--json` |
@@ -1497,9 +1501,9 @@ which for a bundle installed nowhere is a fetch that changes nothing here.
 project` means "everything in this project" and leaves your user-scope
 installations alone.
 
-Anything installed here that is *not* registered — a bundle installed straight
-from a path — is named and skipped, because there is nowhere to re-read it from.
-Register its source and it joins the next run.
+Each installation follows the **registry** or its **source**. The next section
+tells how hcm decides. A bundle installed from a path that nobody registered
+follows its source, so `hcm update` reads that path again.
 
 **`hcm registry update` does only the first half.** It reads registered bundles
 from their sources again and replaces the stored copies. It does not change a
@@ -1531,6 +1535,61 @@ version now collides with is put to you the same way `hcm install` does, and
 
 Bundles that are registered but not installed anywhere just get their stored
 copy refreshed.
+
+### Follow the registry or the source
+
+Software that ships a bundle is installed in one of two ways, and each way needs
+a different update path:
+
+| The software | Example | One version for | The installation follows |
+| --- | --- | --- | --- |
+| A tool that the machine has one time | a CLI, an MCP server, an app | each machine | the **registry** |
+| A library that each project installs | a Python package in `.venv/`, an npm package in `node_modules/` | each project | its **source** |
+
+**Registry.** The tool registers its bundle one time (`my-cli hcm init`). Each
+project installs it by name. After an upgrade of the tool, use one of these:
+
+```bash
+npm update -g my-cli
+hcm registry update              # read the new bundle into the registry
+hcm update                       # in each project: install it there
+# or, in one project, without a change to the registry:
+hcm update --no-registry         # read each bundle from the source that this project recorded
+```
+
+**Source.** Two projects can pin two versions of one library, so one registry
+entry cannot serve both. Install the bundle from the environment of the project,
+with `--track source`. The library can supply a command that does this, for
+example `python -m my_library hcm install`:
+
+```bash
+hcm install .venv/lib/python3.12/site-packages/my_library/hcm_bundle --track source -t claude-code
+pip install -U my_library
+hcm update                       # reads the .venv again; the registry is not read
+```
+
+How hcm decides which one an installation follows:
+
+1. `--track registry` or `--track source` on `hcm install` or `hcm update` sets the mode. hcm records it in `.hcm/state.json`, and a later install or update keeps it.
+2. If no mode is recorded, the installation follows the registry when a bundle with its name is registered. Else it follows its source.
+
+| Command | Effect |
+| --- | --- |
+| `hcm install <name\|id>` | Follows the registry. |
+| `hcm install <path\|url>` | Follows the registry if a bundle with that name is registered, else the source. hcm warns when the registered bundle comes from a different place. |
+| `hcm install <bundle> --track source` | Follows its source. A registered name is read from its origin, not from the store. |
+| `hcm update --no-registry` | Reads each installation from its recorded source, this time only. The registry does not change. |
+| `hcm update <bundle> --track registry` | Starts to follow the registry again, and installs the registered version. |
+| `hcm update <bundle> --track source` | Starts to follow the recorded source. |
+| `hcm update <bundle> --from <path\|url>` | Reads the bundle from a new source, and follows it from now on. Use it when the environment moved. |
+
+Rules:
+
+- An update of a source installation does not read or write the registry. `hcm update my-lib` keeps the pinned version also when `my-lib` is registered.
+- When the source and the registry have different versions of a bundle, `hcm install` and `hcm update` warn. `hcm list --installed` marks the installation `[source]`, and shows the registered version.
+- A local source inside the project, for example in `.venv/` or `node_modules/`, is also recorded as a path relative to the project. A teammate's checkout of the project then reads its own environment.
+- If the source is gone, `hcm update` reports it, updates the other bundles, and exits with code 1. To point the installation at the new place, use `--from`.
+- The built-in `hcm` bundle always has the version of the hcm that runs. It cannot follow a source.
 
 ### Removing
 
