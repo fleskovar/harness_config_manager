@@ -5,10 +5,15 @@
 # publish token to store, rotate or leak.
 #
 # The trusted publisher registered on npm names this file by path, so renaming
-# or moving it breaks publishing until the npm side is updated to match.
+# or moving it breaks publishing until the npm side is updated to match. The
+# setting on npmjs.com: owner `fleskovar`, repository `harness_config_manager`
+# (the GitHub name, with underscores), workflow `release.yml`, no environment.
 #
 # Release, each time:
 #   make publish   # bumps the patch, commits, tags v<version> and pushes both
+#
+# Run it by hand (Actions > Release > Run workflow) for a dry run: everything
+# happens except the upload.
 name: Release
 
 on:
@@ -19,29 +24,39 @@ on:
 
 permissions:
   contents: read
-  # Required twice over: it is how the runner mints the OIDC token that npm
-  # trades for publish rights, and how the published package gets its provenance
-  # attestation tying it to this commit and workflow.
+  # How the runner mints the OIDC token that npm trades for publish rights. npm
+  # also uses it to attach a provenance attestation to the published version.
   id-token: write
+
+# Two tags pushed together publish one after the other, never at once.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      # No `registry-url`: with it, setup-node writes an .npmrc that reads
+      # NODE_AUTH_TOKEN, and sets that variable to a placeholder when no secret
+      # is given. npm then has a token for the registry, and the publish uses
+      # the placeholder instead of the OIDC exchange: the registry answers 404.
+      # Trusted publishing needs no token, secret or .npmrc here.
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: '24'
           cache: npm
-          registry-url: https://registry.npmjs.org
 
-      # Trusted publishing needs npm 11.5.1 or newer; Node 22 still bundles
-      # npm 10.9.x, which has no OIDC support and fails with an authentication
-      # error that reads like a misconfigured publisher rather than an old CLI.
-      - name: Use an npm that supports trusted publishing
+      # Trusted publishing needs npm 11.5.1 or newer. The major is pinned so that
+      # a new npm major cannot change how a release is made without anyone
+      # choosing it: "latest" became npm 12, which changed config parsing and
+      # the supported Node versions.
+      - name: Use npm 11
         run: |
-          npm install -g npm@latest
+          npm install -g npm@11
           npm --version
 
       - run: npm ci
@@ -50,15 +65,26 @@ jobs:
       # what npm actually publishes. Disagreement between them means a mistagged
       # release, so stop before it reaches the registry.
       - name: Check tag matches package.json version
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push'
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           PKG_VERSION="$(node -p 'require("./package.json").version')"
           if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match package.json version $PKG_VERSION"
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $PKG_VERSION"
             exit 1
           fi
           echo "Publishing version $PKG_VERSION"
+
+      # npm refuses a version it already has, and says so only after the whole
+      # verify has run. A tag pushed without a bump fails here in seconds.
+      - name: Check the version is not on npm yet
+        if: github.event_name == 'push'
+        run: |
+          PKG_VERSION="$(node -p 'require("./package.json").version')"
+          if npm view "harness-config-manager@$PKG_VERSION" version >/dev/null 2>&1; then
+            echo "::error::harness-config-manager $PKG_VERSION is already on npm. Run make publish to release the next patch."
+            exit 1
+          fi
 
       - run: npm run typecheck
 
@@ -71,6 +97,36 @@ jobs:
       - name: Smoke test the CLI
         run: node ./dist/cli.js --version
 
-      # No token: npm exchanges the workflow's OIDC identity for publish rights.
+      # Pack once, and publish exactly that tarball. Publishing a tarball runs no
+      # lifecycle scripts, so prepublishOnly does not run the checks above again.
+      - name: Pack the tarball
+        run: |
+          mkdir -p release
+          npm pack --pack-destination release
+          ls -l release
+
+      # No token and no --provenance: npm exchanges the OIDC identity of this
+      # workflow for publish rights, and adds provenance itself. Verbose, so a
+      # failed exchange logs its reason in the "oidc" lines.
       - name: Publish to npm
-        run: npm publish --provenance --access public
+        if: github.event_name == 'push'
+        run: |
+          set -o pipefail
+          npm publish "./release/harness-config-manager-$(node -p 'require("./package.json").version').tgz" \
+            --access public --loglevel verbose 2>&1 | tee publish.log
+
+      # Job logs need admin rights to read, but annotations show on the run page
+      # for everyone. Copy the npm error lines there, so a failed release says why.
+      - name: Report a failed publish
+        if: failure()
+        run: |
+          [ -f publish.log ] || exit 0
+          grep -E 'npm (error|ERR!)|oidc' publish.log | tail -n 25 | while IFS= read -r line; do
+            line="${line//'%'/%25}"
+            echo "::error title=npm publish::${line}"
+          done
+
+      # A manual run stops here: it verifies and packs, and uploads nothing.
+      - name: Dry run - what a tag would publish
+        if: github.event_name == 'workflow_dispatch'
+        run: echo "Dry run. A tag would publish release/harness-config-manager-$(node -p 'require("./package.json").version').tgz, built and checked above."
