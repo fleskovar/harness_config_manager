@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import type { CollectionClashPolicy } from '../core/collection-clash.js';
 import { HcmError } from '../core/errors.js';
 import { flavorNames } from '../core/flavors.js';
 import { parameterNames } from '../core/parameters.js';
@@ -10,9 +11,13 @@ import {
   addToRegistry,
   asList,
   availableEntries,
+  collectionNames,
+  entriesInCollection,
   liveEntries,
+  matchEntry,
   readRegistry,
   refreshEntry,
+  removeCollectionFromRegistry,
   removeFromRegistry,
   requireEntry,
 } from '../core/registry.js';
@@ -23,7 +28,13 @@ import type { RegistryEntry, Scope } from '../core/types.js';
 
 export async function registryAddCommand(
   sources: string | string[],
-  options: { name?: string; dev?: boolean; cwd: string },
+  options: {
+    name?: string;
+    dev?: boolean;
+    collection?: string;
+    onCollectionClash?: CollectionClashPolicy;
+    cwd: string;
+  },
 ): Promise<void> {
   const wanted = asList(sources);
 
@@ -38,7 +49,12 @@ export async function registryAddCommand(
   const entries: RegistryEntry[] = [];
   for (const source of wanted) {
     entries.push(
-      ...(await addToRegistry(source, options.cwd, { name: options.name, dev: options.dev })),
+      ...(await addToRegistry(source, options.cwd, {
+        name: options.name,
+        dev: options.dev,
+        ...(options.collection !== undefined ? { collection: options.collection } : {}),
+        ...(options.onCollectionClash ? { onCollectionClash: options.onCollectionClash } : {}),
+      })),
     );
   }
 
@@ -47,6 +63,16 @@ export async function registryAddCommand(
     log.success(
       `Registered ${color.dim(`[${entry.id}]`)} ${color.bold(entry.name)} v${entry.version}${mode} ` +
         `${color.dim(describeSource(entry.source))}`,
+    );
+  }
+
+  // Tell how to remove the group in one step: that is why it has a name.
+  for (const collection of collectionNames(entries)) {
+    log.info(
+      color.dim(
+        `Collection ${color.bold(collection)}: remove all of its bundles with ` +
+          `"hcm registry remove --collection ${collection}".`,
+      ),
     );
   }
 
@@ -100,29 +126,59 @@ export async function registryAddCommand(
   }
 }
 
+/**
+ * `hcm registry remove` -- unregister bundles by name or id, and with
+ * `--collection`, every bundle of that collection. Give references, a
+ * collection, or both.
+ */
 export async function registryRemoveCommand(
   references: string[],
-  options: { cwd: string },
+  options: { collection?: string; cwd: string },
 ): Promise<void> {
+  if (references.length === 0 && options.collection === undefined) {
+    throw new HcmError(
+      'Name the bundles to remove, or a collection',
+      'For example: "hcm registry remove 3 4", or "hcm registry remove --collection agent-kits".',
+    );
+  }
+
+  // The collection first: a reference to one of its bundles is then already
+  // gone, and is not reported as unknown.
+  const removedByCollection: RegistryEntry[] = [];
+  if (options.collection !== undefined) {
+    for (const removed of await removeCollectionFromRegistry(options.collection)) {
+      removedByCollection.push(removed.entry);
+      await reportRemoval(removed, options.cwd);
+    }
+  }
+
   for (const reference of references) {
     const removed = await removeFromRegistry(reference);
-    if (!removed) throw new HcmError(`"${reference}" is not registered`);
-
-    const { entry, storeRemoved } = removed;
-    log.success(`Removed ${color.dim(`[${entry.id}]`)} ${color.bold(entry.name)}`);
-
-    if (storeRemoved) log.info(color.dim(`  deleted the stored copy (${entry.store})`));
-    else if (entry.dev) {
-      log.info(color.dim(`  left your working copy alone (${describeSource(entry.source)})`));
+    if (removed) await reportRemoval(removed, options.cwd);
+    else if (!matchEntry(removedByCollection, reference)) {
+      throw new HcmError(`"${reference}" is not registered`);
     }
+  }
+}
 
-    const installed = await installationsOf(entry.name, options.cwd);
-    if (installed.length > 0) {
-      log.warn(
-        `  still installed in ${installed.join(', ')} — ` +
-          `run "hcm uninstall ${entry.name}" to remove those items.`,
-      );
-    }
+async function reportRemoval(
+  removed: { entry: RegistryEntry; storeRemoved: boolean },
+  cwd: string,
+): Promise<void> {
+  const { entry, storeRemoved } = removed;
+  log.success(`Removed ${color.dim(`[${entry.id}]`)} ${color.bold(entry.name)}`);
+
+  if (storeRemoved) log.info(color.dim(`  deleted the stored copy (${entry.store})`));
+  else if (entry.dev) {
+    log.info(color.dim(`  left your working copy alone (${describeSource(entry.source)})`));
+  }
+
+  const installed = await installationsOf(entry.name, cwd);
+  if (installed.length > 0) {
+    log.warn(
+      `  still installed in ${installed.join(', ')} — ` +
+        `run "hcm uninstall ${entry.name}" to remove those items.`,
+    );
   }
 }
 
@@ -213,9 +269,16 @@ async function installationsOf(bundle: string, cwd: string): Promise<string[]> {
   return labels;
 }
 
-export async function registryListCommand(options: { json?: boolean }): Promise<void> {
+export async function registryListCommand(
+  options: { json?: boolean; collection?: string },
+): Promise<void> {
   // Read from the working copy for dev entries -- see liveEntry in core/registry.
-  const entries = await liveEntries(await availableEntries());
+  const available = await availableEntries();
+  const selected =
+    options.collection === undefined
+      ? available
+      : entriesInCollection(available, options.collection);
+  const entries = await liveEntries(selected);
 
   if (options.json) {
     log.plain(JSON.stringify(entries, null, 2));
@@ -223,7 +286,12 @@ export async function registryListCommand(options: { json?: boolean }): Promise<
   }
 
   if (entries.length === 0) {
-    log.info('No bundles registered.');
+    if (options.collection === undefined) log.info('No bundles registered.');
+    else {
+      log.info(`No registered bundle is in the collection "${options.collection}".`);
+      const known = collectionNames(available);
+      if (known.length > 0) log.info(color.dim(`Known collections: ${known.join(', ')}`));
+    }
     return;
   }
 
@@ -236,6 +304,9 @@ export async function registryListCommand(options: { json?: boolean }): Promise<
         `${color.dim(`v${entry.version ?? '?'}`)}${mode}`,
     );
     log.plain(`  ${' '.repeat(width)}${color.dim(describeSource(entry.source))}`);
+    if (entry.collection) {
+      log.plain(`  ${' '.repeat(width)}${color.dim(`collection: ${entry.collection.name}`)}`);
+    }
     // What this one can be installed as a part of, which is not something the
     // name or the source can tell you.
     if (entry.flavors?.length) {

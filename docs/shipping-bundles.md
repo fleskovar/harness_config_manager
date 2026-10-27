@@ -137,6 +137,7 @@ each language.
 - If the bundle uses a feature of a newer hcm, compare the output of `hcm --version` in the registration command.
 - To give your agents the hcm skills too, add `hcm` to `dependencies`. Every hcm installation has the built-in `hcm` bundle.
 - To ship more than one bundle, put each bundle in its own subfolder of one folder. `hcm registry add <folder>` registers each bundle in that collection.
+- Put an `hcm_manifest.yml` file with a `collection` name in the collection folder. Then the user can remove all your bundles in one step. See [Shipping several bundles together](authoring-bundles.md#shipping-several-bundles-together).
 
 ## Test the integration
 

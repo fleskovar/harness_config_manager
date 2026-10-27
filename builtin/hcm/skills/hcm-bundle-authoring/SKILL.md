@@ -1,5 +1,5 @@
 ---
-description: Write, check and publish an hcm bundle of subagents, skills, commands, rules, context, MCP servers and settings. Use when the user asks to make an hcm bundle, to add a resource to a bundle, or to fix a problem that hcm validate or hcm refs check reports.
+description: Write, check and publish an hcm bundle of subagents, skills, commands, rules, context, MCP servers and settings. Also write a collection of bundles with an hcm_manifest.yml file. Use when the user asks to make an hcm bundle or collection, or to add a resource to a bundle. Also use it to add a collection manifest or a collection name to an existing folder of bundles. Also use it to fix a problem that hcm validate or hcm refs check reports.
 flavors: [authoring]
 ---
 
@@ -96,6 +96,22 @@ After the uninstall, the folder must be empty. Do these checks too:
 - If the bundle has flavors, install each flavor in its own empty folder. Make sure that the common part works without the other flavors.
 - If the bundle has dependencies, make sure that the uninstall removes them.
 - To see what users get from a new version, run `hcm update my-kit --dry-run`. The output shows the items that the update removes and the items that it writes.
+
+## Collections of bundles
+
+A collection is one folder, usually one repository, with more than one bundle.
+Its `hcm_manifest.yml` file holds the data that is the same for all its
+bundles:
+
+- `collection` gives the bundles a name in the registry. `hcm registry remove --collection <name>` then removes all of them.
+- `bundles` lists the bundle folders. Without it, hcm reads each direct subfolder that contains an `hcm.yaml`.
+
+Read [the collections guide](./collections.md) for these tasks:
+
+- Make a new collection.
+- Add a manifest to a folder that already ships more than one bundle.
+- Choose a collection name, and decide on the `bundles` list.
+- Resolve a collection name clash.
 
 ## Ship a bundle with your software
 

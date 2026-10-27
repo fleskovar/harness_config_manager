@@ -20,6 +20,7 @@
 import path from 'node:path';
 import YAML from 'yaml';
 import { HcmError } from './errors.js';
+import { loadCollectionManifest } from './collection.js';
 import { attachFlavors, flavorProblems, normalizeFlavors } from './flavors.js';
 import { parseMarkdown } from './frontmatter.js';
 import { fs, isDirectory, listFiles, pathExists, toPosix } from './fsx.js';
@@ -166,6 +167,14 @@ function parseDependencyString(entry: string, where: string): BundleDependency {
   return { name: trimmed.slice(0, at), version: trimmed.slice(at + 1) };
 }
 
+/** The bundles in a directory, and the collection name that the collection manifest gives them. */
+export interface DiscoveredBundles {
+  /** Absolute bundle directories. Empty when nothing was found. */
+  dirs: string[];
+  /** From the collection manifest (`hcm_manifest.yml`), when it declares one. */
+  collection?: string;
+}
+
 /**
  * Find the bundles in a directory.
  *
@@ -175,11 +184,29 @@ function parseDependencyString(entry: string, where: string): BundleDependency {
  * nesting collections inside collections would make `hcm install <path>`
  * unpredictable.
  *
- * Returns absolute directory paths, sorted, empty when nothing was found.
+ * A collection can have a collection manifest -- see `collection.ts`. Its
+ * `bundles` list replaces the search, in the order given, and can name deeper
+ * folders. Its `collection` name is returned for the registry to record.
  */
-export async function discoverBundleDirs(root: string): Promise<string[]> {
+export async function discoverBundles(root: string): Promise<DiscoveredBundles> {
   const absoluteRoot = path.resolve(root);
-  if (await findManifest(absoluteRoot)) return [absoluteRoot];
+  const bundleManifest = await findManifest(absoluteRoot);
+  const collection = await loadCollectionManifest(absoluteRoot);
+
+  if (bundleManifest && collection) {
+    throw new HcmError(
+      `${absoluteRoot} has both a bundle manifest and a collection manifest`,
+      `A folder is one bundle or a collection of bundles. Remove ${path.basename(bundleManifest)} ` +
+        `or ${path.basename(collection.path)}.`,
+    );
+  }
+  if (bundleManifest) return { dirs: [absoluteRoot] };
+
+  const named = collection?.collection ? { collection: collection.collection } : {};
+  if (collection?.bundles) {
+    const dirs = await listedBundleDirs(absoluteRoot, collection.bundles, collection.path);
+    return { dirs, ...named };
+  }
 
   const entries = await fs.readdir(absoluteRoot, { withFileTypes: true });
   const found: string[] = [];
@@ -193,7 +220,32 @@ export async function discoverBundleDirs(root: string): Promise<string[]> {
     if (await findManifest(candidate)) found.push(candidate);
   }
 
-  return found;
+  return { dirs: found, ...named };
+}
+
+/** `discoverBundles`, without the collection name. Absolute directory paths. */
+export async function discoverBundleDirs(root: string): Promise<string[]> {
+  return (await discoverBundles(root)).dirs;
+}
+
+/** The folders that a collection manifest lists. Each one must hold a bundle. */
+async function listedBundleDirs(
+  root: string,
+  listed: string[],
+  manifestPath: string,
+): Promise<string[]> {
+  const dirs: string[] = [];
+  for (const relative of listed) {
+    const dir = path.join(root, ...relative.split('/'));
+    if (!(await findManifest(dir))) {
+      throw new HcmError(
+        `"${relative}" in ${manifestPath} is not a bundle folder`,
+        `Expected one of ${MANIFEST_NAMES.join(', ')} in ${dir}.`,
+      );
+    }
+    dirs.push(dir);
+  }
+  return dirs;
 }
 
 /**

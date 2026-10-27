@@ -265,6 +265,7 @@ const AMBIENT_FILENAMES = new Set([
   'readme.md', 'license', 'license.md', 'changelog.md', 'contributing.md',
   // hcm's own vocabulary: these name a convention, not a file to point at.
   'hcm.yaml', 'hcm.yml', 'hcm.json', 'claude.md', 'agents.md', 'reasonix.md',
+  'hcm_manifest.yml', 'hcm_manifest.yaml', 'hcm_manifest.json',
   'settings.json', 'mcp.json', '.mcp.json', 'mcp-config.json', 'opencode.json', 'reasonix.toml',
   'copilot-instructions.md',
 ]);

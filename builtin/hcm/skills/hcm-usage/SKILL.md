@@ -1,5 +1,5 @@
 ---
-description: Install, update and remove hcm bundles in a project or for the user, and check the result. Use when the user asks to add skills, subagents, commands, rules or MCP servers with hcm, or to change what hcm installed.
+description: Install, update and remove hcm bundles in a project or for the user, and check the result. Also manage the hcm registry. Use when the user asks to add skills, subagents, commands, rules or MCP servers with hcm, or to change what hcm installed. Also use it to register, group or unregister bundles, for example all bundles of one repository or named collection.
 ---
 
 # Use hcm
@@ -33,6 +33,8 @@ so hcm stops when it needs an answer. Give each answer on the command line:
 - Give `--on-conflict rename` when the user wants to keep both items. hcm then installs the bundle item with the bundle name as a suffix, and changes the references in the bundle to the new name.
 - Do not use `--force` or `--on-conflict overwrite` unless the user tells you to. These options replace files that the user wrote or edited.
 - Run each command with `--dry-run` first, and read the plan. If the plan changes files that hcm did not write, ask the user before you continue.
+- Before you run `hcm registry remove --collection`, show the user the bundles of the collection. Continue only when the user agrees.
+- If `hcm registry add` reports a collection name clash, ask the user to choose. Then give `--on-collection-clash join`, `rename` or `abort`.
 
 ## Install a bundle
 
@@ -66,6 +68,7 @@ hcm registry add ./my-kit                  # a local folder; hcm copies it
 hcm registry add owner/repo/path#v1.0.0    # a folder in a GitHub repository, at a tag
 hcm registry add https://dev.azure.com/org/project/_git/repo#v1.0.0:path   # the same, on another git host
 hcm registry add ./my-kit --dev            # a folder that you edit; hcm reads it in place
+hcm registry add ./agent-kits              # a collection: hcm registers each bundle in it
 ```
 
 hcm copies a registered bundle into its store. A change at the source has no
@@ -81,10 +84,103 @@ the latest edits.
 | Install the new version of one bundle | `hcm update <bundle> -t <harness> --no-prompt` |
 | Remove a bundle, and the dependencies that no other bundle needs | `hcm uninstall <bundle> -t <harness>` |
 | Unregister a bundle | `hcm registry remove <bundle>` |
+| Unregister each bundle of a named collection, for example each bundle of one repository | `hcm registry remove --collection <name>`. See [Remove a named collection](#remove-a-named-collection). |
 
 `hcm update` and `hcm uninstall` do not change an item that somebody edited
 after the install. hcm reports the item as `modified` and stops for that bundle.
 Tell the user. Use `--force` only if the user agrees to lose the edit.
+
+## Manage the registry
+
+The registry is the list of bundles that the user can install by name or id.
+There is one registry for each user, for all projects.
+
+| Task | Command |
+| --- | --- |
+| See the registered bundles, with their ids, sources and collection names | `hcm registry list` |
+| See the bundles of one named collection | `hcm registry list --collection <name>` |
+| See the full data of each entry | `hcm registry list --json` |
+| Register each bundle of a collection | `hcm registry add <collection>` |
+| Give the bundles of a source a collection name | `hcm registry add <source> --collection <name>` |
+| Read the registered bundles from their sources again | `hcm registry update` |
+| Unregister bundles | `hcm registry remove <bundle...>` |
+| Unregister each bundle of a named collection | `hcm registry remove --collection <name>` |
+| Show the folder that holds the copies of the bundles | `hcm registry open --no-open` |
+
+### Named collections
+
+The registry records a collection name on each bundle of a named collection.
+Usually, these are the bundles of one repository. The name comes from one of
+these:
+
+- The `collection` in the `hcm_manifest.yml` file of the collection. hcm reads it when you register the collection folder.
+- The `--collection <name>` option of `hcm registry add`. It replaces the name of the collection manifest.
+
+Rules:
+
+- When you register a bundle again with no collection name, the bundle keeps its collection.
+- `hcm registry update` does not change a collection name. To get a new name from the collection manifest, register the collection again.
+- hcm ignores the case of collection names.
+- `hcm export` does not record collection names. After `hcm import`, give the names again with `--collection`.
+
+### Collection name clashes
+
+A clash occurs when a registration asks for a collection name, and bundles of
+a different source already have that name. hcm writes nothing until the clash
+is resolved. The choices are:
+
+| Choice | Result |
+| --- | --- |
+| `join` | The new bundles go into the existing collection. One removal command then removes the bundles of both sources. |
+| `rename` | The new bundles go into a collection with another name. The default is `<name>-2`. hcm records the rename, and does not ask again for the same source. |
+| `abort` | hcm registers nothing. |
+
+hcm asks only at a terminal. An agent has no terminal, so hcm stops with the
+message `The collection name "<name>" is in use by ...`. Then do these steps:
+
+1. Tell the user the name, and the source that already uses it.
+2. Ask the user to choose `join`, `rename` or `abort`. Recommend `rename` when the two sources are not related.
+3. Run the same command again with `--on-collection-clash <choice>`.
+
+Do not give `--on-collection-clash join` without the consent of the user.
+
+These cases are not clashes, and hcm does not ask:
+
+- The source already has bundles in the collection.
+- The sources differ only in the ref, for example `#v1.0.0` and `#v1.1.0`.
+- One source is inside the other, for example a collection folder and one of its bundle folders.
+- The only bundles with the name are bundles that the registration replaces.
+
+### Remove a named collection
+
+`hcm registry remove` changes only the registry. It does not remove the items
+that a bundle installed in a project.
+
+1. Run `hcm registry list --collection <name>`. Show the list to the user, and ask for confirmation.
+2. If the user also wants the installed items removed, run `hcm list --installed` in each project.
+3. For each project that has a bundle of the collection, run `hcm uninstall <bundle...> -t <harness>` there.
+4. Run `hcm registry remove --collection <name>`.
+5. Read the output. hcm warns when a bundle is still installed in this project or for the user. Tell the user about each warning.
+
+To remove a named collection and other bundles in one command, give both:
+`hcm registry remove 7 --collection <name>`.
+
+### Name bundles that you registered before
+
+Bundles of one source can be in the registry with no collection name. Give
+them a name:
+
+1. Run `hcm registry list --json`. Find the entries of the source. Note the `source` and the `dev` value of each entry.
+2. If the source has an `hcm_manifest.yml` file with a `collection`, register the collection folder again: `hcm registry add <collection>`.
+3. If not, give the name: `hcm registry add <collection> --collection <name>`.
+4. For an entry with `"dev": true`, give `--dev` again. Without it, hcm replaces the entry with a copy.
+5. If the entries are a mix of `--dev` entries and copies, register each `--dev` bundle from its own folder: `hcm registry add <bundle-folder> --dev --collection <name>`.
+6. If hcm reports a clash, follow [Collection name clashes](#collection-name-clashes).
+7. Run `hcm registry list --collection <name>`. Make sure that each bundle of the source is in the list.
+
+A second registration keeps the id of each bundle. It does not change a
+project. To add a manifest to the collection itself, use the
+`hcm-bundle-authoring` skill.
 
 ## Repair the instruction file
 

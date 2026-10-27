@@ -38,6 +38,10 @@ import { targetsCommand } from './commands/targets.js';
 import { uninstallCommand } from './commands/uninstall.js';
 import { updateCommand } from './commands/update.js';
 import { validateCommand } from './commands/validate.js';
+import {
+  COLLECTION_CLASH_POLICIES,
+  type CollectionClashPolicy,
+} from './core/collection-clash.js';
 import { CONFLICT_POLICIES, type ConflictPolicy } from './core/conflicts.js';
 import { ConflictError, HcmError } from './core/errors.js';
 import { ALL_FLAVORS } from './core/flavors.js';
@@ -670,6 +674,17 @@ config
 
 const registry = program.command('registry').description('manage the list of known bundles');
 
+/**
+ * Without this, a collection name in use by another source asks -- when there
+ * is a terminal to ask at, and otherwise stops, having registered nothing.
+ */
+const collectionClashOption = () =>
+  new Option(
+    '--on-collection-clash <policy>',
+    'what to do when another source already uses the collection name: ask, ' +
+      'join that collection, use another name, or stop',
+  ).choices([...COLLECTION_CLASH_POLICIES]);
+
 registry
   .command('add')
   .argument(
@@ -679,17 +694,29 @@ registry
   )
   .option('-n, --name <name>', 'override the registered name (one source only)')
   .option('--dev', 'read a local bundle in place, so edits apply without re-registering')
+  .option(
+    '--collection <name>',
+    'put the bundles in this named collection (replaces the collection name of hcm_manifest.yml)',
+  )
+  .addOption(collectionClashOption())
   .description('register bundles so they can be installed by name or id')
   .action(async (sources, options) => {
-    await registryAddCommand(sources, { name: options.name, dev: options.dev, cwd });
+    await registryAddCommand(sources, {
+      name: options.name,
+      dev: options.dev,
+      collection: options.collection,
+      onCollectionClash: options.onCollectionClash as CollectionClashPolicy | undefined,
+      cwd,
+    });
   });
 
 registry
   .command('remove')
-  .argument('<bundle...>', 'registered bundle name(s) or id(s)')
-  .description('unregister a bundle and delete its stored copy')
-  .action(async (bundles) => {
-    await registryRemoveCommand(bundles, { cwd });
+  .argument('[bundle...]', 'registered bundle name(s) or id(s)')
+  .option('--collection <name>', 'also remove every bundle of this named collection')
+  .description('unregister bundles and delete their stored copies')
+  .action(async (bundles, options) => {
+    await registryRemoveCommand(bundles, { collection: options.collection, cwd });
   });
 
 registry
@@ -704,9 +731,10 @@ registry
 registry
   .command('list')
   .option('--json', 'machine-readable output')
+  .option('--collection <name>', 'list only the bundles of this named collection')
   .description('list registered bundles')
   .action(async (options) => {
-    await registryListCommand({ json: options.json });
+    await registryListCommand({ json: options.json, collection: options.collection });
   });
 
 registry

@@ -7,8 +7,8 @@ from the registry.
 | Resource | Flavor | Use |
 | --- | --- | --- |
 | `context/10-hcm.md` | common | Tells the agent that hcm manages the agent configuration of the project. |
-| `skills/hcm-usage/` | common | Find, install, update and remove bundles. |
-| `skills/hcm-bundle-authoring/` | `authoring` | Write, check and publish a bundle. |
+| `skills/hcm-usage/` | common | Find, install, update and remove bundles. Manage the registry, and the named collections in it. |
+| `skills/hcm-bundle-authoring/` | `authoring` | Write, check and publish a bundle or a collection of bundles. Add a collection manifest to an existing collection. |
 | `skills/hcm-integration/` | `integration` | Ship a bundle with a CLI tool (`my-cli hcm init`), with a library (`python -m my_library.hcm init`, `npx --no my-lib-hcm init`), or as a separate download. |
 
 ## Install

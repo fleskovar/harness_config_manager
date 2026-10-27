@@ -56,10 +56,10 @@ options.
 | `hcm validate [dir]` | Check a bundle for common mistakes. |
 | `hcm refs check -p <path>` | Report file references that point to no file. |
 | `hcm refs fix -p <path>` | Repair broken references from a list of candidates. |
-| `hcm registry add <source...>` | Register bundles from a path, `owner/repo`, a GitHub URL, or the HTTPS clone URL of any git host. `--dev` reads a local bundle in place. `-n, --name` sets a different name. |
+| `hcm registry add <source...>` | Register bundles from a path, `owner/repo`, a GitHub URL, or the HTTPS clone URL of any git host. `--dev` reads a local bundle in place. `-n, --name` sets a different name. `--collection <name>` gives the bundles a collection name. `--on-collection-clash join\|rename\|abort` resolves a name that another source uses. |
 | `hcm registry update [bundle...]` | Read registered bundles from their sources again, and replace the stored copies. It does not change a project. No argument: all registered bundles. `--dry-run`. |
-| `hcm registry remove <bundle...>` | Unregister bundles and delete their stored copies. |
-| `hcm registry list` | The registered bundles, with ids. `--json`. |
+| `hcm registry remove [bundle...]` | Unregister bundles and delete their stored copies. `--collection <name>` removes each bundle of the named collection. |
+| `hcm registry list` | The registered bundles, with ids and collection names. `--collection <name>` shows one collection. `--json`. |
 | `hcm registry open [bundle]` | Show the folder of the store or of one bundle. `--no-open` only prints the path. |
 | `hcm export [file]` | Write the installed bundles, or the registry with `--registry`, to `bundles.txt`. |
 | `hcm import [file]` | Register the bundles in a bundles file. `--install` installs them too. |

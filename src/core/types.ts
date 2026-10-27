@@ -303,6 +303,11 @@ export interface RegistryEntry {
    */
   parameters?: ParameterSummary[];
   /**
+   * The named collection that the bundle belongs to. `hcm registry remove
+   * --collection` removes all its bundles. See `CollectionMembership`.
+   */
+  collection?: CollectionMembership;
+  /**
    * Directory name inside the store holding this bundle's files. Absent for
    * `--dev` entries, which are read from `source` in place.
    */
@@ -316,6 +321,30 @@ export interface RegistryEntry {
   builtin?: boolean;
   addedAt?: string;
   updatedAt?: string;
+}
+
+/**
+ * A registry entry's place in a named collection.
+ *
+ * The name comes from the `collection` of the collection manifest, or from
+ * `hcm registry add --collection`. Two sources cannot share a name by
+ * accident: a registration that asks for a name in use by another source is a
+ * clash, and the user joins, renames or aborts. See `core/collection-clash.ts`.
+ */
+export interface CollectionMembership {
+  name: string;
+  /**
+   * Where the collection was registered from: the collection folder or
+   * repository, or the bundle itself for a single bundle. Two sources are the
+   * same when only the ref differs.
+   */
+  source: BundleSource;
+  /**
+   * The name that the registration asked for, when a clash made the user pick
+   * `name` instead. A later registration from the same source that asks for
+   * this name again gets `name` without a question.
+   */
+  requested?: string;
 }
 
 export interface RegistryFile {

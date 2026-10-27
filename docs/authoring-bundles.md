@@ -788,6 +788,36 @@ Prefer a collection over one giant bundle when the pieces are independently
 useful: users install and uninstall at bundle granularity, so splitting lets
 them take the review kit without the database tooling.
 
+### The collection manifest
+
+Add an `hcm_manifest.yml` file to the collection folder to describe the
+collection. All fields are optional:
+
+```yaml
+# agent-kits/hcm_manifest.yml
+collection: acme-kits   # the collection name that each bundle gets in the registry
+bundles:                # the bundle folders, relative to this file
+  - review-kit
+  - db-kit
+```
+
+- `collection` names the collection in the registry. A user removes all its
+  bundles with `hcm registry remove --collection acme-kits`.
+- Choose a name that no other source uses, for example with your organization as
+  a prefix. If the user already has the name from another source, hcm asks the
+  user to join that collection, to use another name, or to stop.
+- `bundles` lists the bundle folders. hcm reads only these folders, in the list
+  order. A folder can be deeper than one level, for example `bundles/db-kit`.
+  Without `bundles`, hcm searches the direct subfolders.
+- Each listed folder must contain an `hcm.yaml`, and must be inside the
+  collection folder.
+- Do not put `hcm.yaml` and `hcm_manifest.yml` in the same folder. hcm refuses
+  that folder.
+
+hcm reads the collection manifest only when the user registers the collection
+folder. When the user registers one bundle folder directly, the bundle gets no
+collection name.
+
 ## Testing a bundle before publishing
 
 ```bash

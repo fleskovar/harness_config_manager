@@ -84,3 +84,30 @@ in the test suite of your software.
 To ship more than one bundle, put each bundle in its own subfolder of one
 folder. That folder is a collection. `hcm registry add <folder>` registers each
 bundle in it, and each bundle keeps its own name.
+
+Put an `hcm_manifest.yml` file in the collection folder. Give the name of your
+software as the `collection` name:
+
+```
+hcm-bundles/
+├── hcm_manifest.yml
+├── my-cli-core/hcm.yaml
+└── my-cli-extras/hcm.yaml
+```
+
+```yaml
+collection: my-cli
+bundles:            # optional; the default is each direct subfolder with an hcm.yaml
+  - my-cli-core
+  - my-cli-extras
+```
+
+- Your registration command gives hcm the collection folder, not each bundle folder: `hcm registry add <hcm-bundles-folder>`. Only then does hcm record the collection name.
+- Your removal command removes the whole collection: `hcm registry remove --collection my-cli`. Then a bundle that you dropped from a later release also goes.
+- Give each bundle the name of the package as a prefix, for example `my-cli-core`.
+- Keep the version of each bundle equal to the package version.
+- In the test of the integration, run `hcm registry list --collection my-cli --json`. Make sure that it lists each bundle.
+- A script can call your registration command without a terminal. If another source already uses the name, hcm then stops with a clash. Show the hcm output to the user. Give `--on-collection-clash` only when the user passes it to your command.
+
+To write the collection, or to add a manifest to bundles that you ship now,
+use the `hcm-bundle-authoring` skill.

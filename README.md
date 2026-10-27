@@ -85,8 +85,8 @@ register it. `hcm list` shows it with the mark `[built-in]`.
 | Resource | Flavor | Use |
 | --- | --- | --- |
 | `context/10-hcm.md` | common | Tells the agent that hcm manages the agent configuration of the project. |
-| `skills/hcm-usage/` | common | Find, install, update and remove bundles. |
-| `skills/hcm-bundle-authoring/` | `authoring` | Write, check and publish a bundle. |
+| `skills/hcm-usage/` | common | Find, install, update and remove bundles. Manage the registry, and the named collections in it. |
+| `skills/hcm-bundle-authoring/` | `authoring` | Write, check and publish a bundle or a collection of bundles. Add a collection manifest to an existing collection. |
 | `skills/hcm-integration/` | `integration` | Ship a bundle with a CLI tool (`my-cli hcm init`), with a library (`python -m my_library.hcm init`, `npx --no my-lib-hcm init`), or as a separate download. |
 
 To add hcm support to a project, install the bundle there:
@@ -1281,11 +1281,11 @@ hcm install my-kit --on-conflict prompt     # ask even where hcm would not have
 | `hcm validate [dir]` | Check a bundle for common mistakes |
 | `hcm init [dir]` | Scaffold a new bundle |
 | `hcm targets` | Supported harnesses, their paths, which are set up here, and the files they share |
-| `hcm registry add <source...>` | Register bundles by path, `owner/repo`, GitHub URL, or the HTTPS clone URL of any git host. `--dev`, `-n/--name` (one source only) |
+| `hcm registry add <source...>` | Register bundles by path, `owner/repo`, GitHub URL, or the HTTPS clone URL of any git host. `--dev`, `-n/--name` (one source only), `--collection <name>`, `--on-collection-clash prompt\|join\|rename\|abort` |
 | `hcm registry update [bundle...]` | Read registered bundles from their sources again, and replace the stored copies. No argument: all of them. `--dry-run` |
-| `hcm registry remove <bundle...>` | Unregister and delete the stored copy |
+| `hcm registry remove [bundle...]` | Unregister and delete the stored copy. `--collection <name>` removes each bundle of that [named collection](#named-collections-remove-a-group-in-one-step) |
 | `hcm registry open [bundle]` | Print — and open — where registered bundles are stored |
-| `hcm registry list` | List registered bundles with their ids |
+| `hcm registry list` | List registered bundles with their ids. `--collection <name>` lists only that collection. `--json` |
 | `hcm export [file]` | Write installed (or `--registry`) bundles to `bundles.txt` |
 | `hcm import [file]` | Register everything a bundles file lists; `--install` to install too, `-f/--flavor`, `--param`, `--params-file`, `--on-conflict` |
 | `hcm config` | Show settings; `config set\|get\|unset` to change them |
@@ -1574,6 +1574,98 @@ out of a collection, name its subdirectory: `hcm install acme/agent-kits/db-kit`
 
 Only one level is searched. A bundle that happens to contain a nested `hcm.yaml`
 is still one bundle, not a collection.
+
+#### The collection manifest: `hcm_manifest.yml`
+
+A collection can have a collection manifest in its root folder. The file name is
+`hcm_manifest.yml`, `hcm_manifest.yaml` or `hcm_manifest.json`. All fields are
+optional:
+
+```yaml
+# agent-kits/hcm_manifest.yml
+collection: agent-kits  # the collection name that each bundle gets in the registry
+bundles:                # the bundle folders, relative to this file
+  - review-kit
+  - bundles/db-kit      # a deeper folder is permitted
+```
+
+- `collection` sets the [collection name](#named-collections-remove-a-group-in-one-step)
+  of each bundle that `hcm registry add` registers from the collection.
+- `bundles` replaces the search of the direct subfolders. hcm reads only the
+  folders in the list, in the list order. Each folder must contain an
+  `hcm.yaml`. A path must stay inside the collection folder.
+- Without `bundles`, hcm searches the direct subfolders, as for a collection
+  without a manifest.
+
+A folder is one bundle or one collection. hcm refuses a folder that contains
+`hcm.yaml` and `hcm_manifest.yml` together.
+
+#### Named collections: remove a group in one step
+
+The registry records the collection name of each bundle. Use it to remove all
+the bundles of one collection with one command:
+
+```bash
+hcm registry add ./agent-kits                       # the name from hcm_manifest.yml
+hcm registry add acme/agent-kits --collection acme  # or give the name yourself
+hcm registry list --collection agent-kits           # show the bundles of the collection
+hcm registry remove --collection agent-kits         # unregister all of them
+```
+
+- `--collection` on `hcm registry add` replaces the name of the collection
+  manifest. It also works for a single bundle.
+- When you register a bundle again with no collection name, the bundle keeps
+  its collection. Thus `hcm registry add ./agent-kits/review-kit --dev` keeps
+  `review-kit` in the `agent-kits` collection.
+- hcm reads the collection manifest only when you register the collection
+  folder. A bundle that you register from its own folder gets no collection
+  name from the manifest.
+- hcm ignores the case of collection names. A name uses letters, digits, dots,
+  dashes and underscores.
+- `hcm registry remove --collection` does not uninstall. If a bundle of the
+  collection is installed, the command tells you where. Use `hcm uninstall` to
+  remove the items.
+- `hcm export` writes one source for each bundle, and not the collection name.
+  Thus the bundles that `hcm import` registers from an exported file have no
+  collection name.
+
+#### When two sources use the same collection name
+
+One collection name must mean one group, or `hcm registry remove --collection`
+removes more than you expect. A registration that asks for a name that bundles
+of a different source already use is a *clash*:
+
+```
+! The collection name "agent-kits" is in use by bundles review-kit, db-kit from acme/agent-kits.
+What do you want to do with the bundles from ./my-kits?
+   1) join -- put them in "agent-kits" too; removing the collection then removes both groups
+  *2) rename -- put them in a collection with another name, for example "agent-kits-2"
+   3) abort -- register nothing
+? choose 1-3 [2]:
+```
+
+- **join** puts the new bundles in the existing collection.
+- **rename** asks for another name. Press Enter to accept the suggestion. hcm
+  records the rename. A later registration of the same source gets the same
+  name, with no question.
+- **abort** registers nothing.
+
+hcm asks before it writes anything. Without a terminal, hcm stops, registers
+nothing, and tells you to choose with `--on-collection-clash`:
+
+```bash
+hcm registry add ./my-kits --on-collection-clash rename   # or join, or abort
+```
+
+These cases are not clashes:
+
+- The source already has bundles in the collection, because it joined before.
+- The sources differ only in the ref, for example `acme/kits#v1` and `acme/kits#v2`.
+- One source is inside the other, for example `./kits` and `./kits/review-kit`.
+- The only bundles with the name are bundles that this registration replaces.
+  An example is a collection that moved to a new folder.
+
+`hcm import --no-prompt` never asks. A clash fails that line of the file.
 
 ### Settings
 

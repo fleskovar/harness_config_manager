@@ -76,7 +76,12 @@ export async function importCommand(file: string | undefined, options: ImportOpt
     }
 
     try {
-      const entries = await addToRegistry(reference, options.cwd);
+      // --no-prompt never asks: a collection name clash fails this reference.
+      const entries = await addToRegistry(
+        reference,
+        options.cwd,
+        options.prompt === false ? { onCollectionClash: 'abort' } : {},
+      );
       for (const entry of entries) {
         registered.push(entry.name);
         log.success(`  registered ${color.bold(entry.name)} ${color.dim(`v${entry.version}`)}`);

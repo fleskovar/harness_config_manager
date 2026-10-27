@@ -8,7 +8,7 @@
  */
 
 import path from 'node:path';
-import { discoverBundleDirs, findNestedBundleDirs, loadBundle } from './bundle.js';
+import { discoverBundles, findNestedBundleDirs, loadBundle } from './bundle.js';
 import {
   BUILTIN_BUNDLES,
   builtinDir,
@@ -16,6 +16,12 @@ import {
   isBuiltinName,
   isReservedId,
 } from './builtin.js';
+import {
+  type CollectionClashPolicy,
+  type CollectionClashResolver,
+  resolveMembership,
+} from './collection-clash.js';
+import { checkCollectionName } from './collection.js';
 import { HcmError } from './errors.js';
 import { summarizeFlavors } from './flavors.js';
 import { summarizeParameters } from './parameters.js';
@@ -244,15 +250,16 @@ function narrowSource(source: BundleSource, root: string, bundleDir: string): Bu
 }
 
 /**
- * Load every bundle a source contains. One directory holding a manifest yields
- * a single bundle; a collection of sibling bundle folders yields all of them.
+ * Load every bundle a source contains, with the collection name that its collection
+ * manifest declares. One directory holding a manifest yields a single bundle;
+ * a collection of bundle folders yields all of them.
  */
-export async function loadBundlesFrom(
+export async function loadCollectionFrom(
   source: BundleSource,
   options: FetchOptions = {},
-): Promise<LoadedBundle[]> {
+): Promise<{ bundles: LoadedBundle[]; collection?: string }> {
   const root = await resolveSource(source, options);
-  const dirs = await discoverBundleDirs(root);
+  const { dirs, collection } = await discoverBundles(root);
 
   if (dirs.length === 0) {
     throw new HcmError(
@@ -262,7 +269,18 @@ export async function loadBundlesFrom(
     );
   }
 
-  return Promise.all(dirs.map((dir) => loadBundle(dir, narrowSource(source, root, dir))));
+  const bundles = await Promise.all(
+    dirs.map((dir) => loadBundle(dir, narrowSource(source, root, dir))),
+  );
+  return { bundles, ...(collection ? { collection } : {}) };
+}
+
+/** `loadCollectionFrom`, without the collection name. */
+export async function loadBundlesFrom(
+  source: BundleSource,
+  options: FetchOptions = {},
+): Promise<LoadedBundle[]> {
+  return (await loadCollectionFrom(source, options)).bundles;
 }
 
 /**
@@ -363,12 +381,32 @@ export function liveEntries(entries: RegistryEntry[]): Promise<RegistryEntry[]> 
   return Promise.all(entries.map((entry) => liveEntry(entry)));
 }
 
-/** Register a bundle, or every bundle in a collection. */
+/**
+ * Register a bundle, or every bundle in a collection.
+ *
+ * The collection name of each entry is `options.collection`, else the
+ * `collection` of the collection manifest. A name in use by another source is
+ * a clash, resolved before anything is written -- see `collection-clash.ts`.
+ * Without a name, a re-registered entry keeps its collection: registering one
+ * bundle of a collection again on its own, for example with `--dev`, does not
+ * take it out of its group.
+ */
 export async function addToRegistry(
   input: string,
   cwd: string,
-  options: { name?: string; dev?: boolean } = {},
+  options: {
+    name?: string;
+    dev?: boolean;
+    collection?: string;
+    onCollectionClash?: CollectionClashPolicy;
+    /** Replaces the prompt and the policy. For tests. */
+    resolveCollectionClash?: CollectionClashResolver;
+  } = {},
 ): Promise<RegistryEntry[]> {
+  const requestedCollection =
+    options.collection === undefined
+      ? undefined
+      : checkCollectionName(options.collection, '--collection');
   const source = parseSource(input, cwd);
 
   if (options.dev && source.type !== 'local') {
@@ -379,7 +417,9 @@ export async function addToRegistry(
     );
   }
 
-  const bundles = await loadBundlesFrom(source, { refresh: true });
+  const loaded = await loadCollectionFrom(source, { refresh: true });
+  const { bundles } = loaded;
+  const declaredCollection = requestedCollection ?? loaded.collection;
 
   if (options.name && bundles.length > 1) {
     throw new HcmError(
@@ -390,6 +430,20 @@ export async function addToRegistry(
 
   const registry = await readRegistry();
   const added: RegistryEntry[] = [];
+
+  const membership =
+    declaredCollection === undefined
+      ? undefined
+      : await resolveMembership({
+          requested: declaredCollection,
+          source,
+          entries: registry.entries,
+          replacing: new Set(bundles.map((bundle) => options.name ?? bundle.manifest.name)),
+          ...(options.onCollectionClash ? { policy: options.onCollectionClash } : {}),
+          ...(options.resolveCollectionClash
+            ? { resolver: options.resolveCollectionClash }
+            : {}),
+        });
 
   for (const bundle of bundles) {
     const name = options.name ?? bundle.manifest.name;
@@ -409,11 +463,13 @@ export async function addToRegistry(
 
     // Re-registering keeps the id, so anything you have written down still works.
     const id = existing?.id ?? nextRegistryId(registry.entries.map((entry) => entry.id));
+    const collection = membership ?? existing?.collection;
     const entry: RegistryEntry = {
       id,
       name,
       source: bundle.source,
       ...bundleMetadata(bundle),
+      ...(collection ? { collection } : {}),
       ...(options.dev ? { dev: true } : { store: storeSlug({ id, name }) }),
       addedAt: existing?.addedAt ?? new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -451,11 +507,63 @@ export async function removeFromRegistry(
     return undefined;
   }
 
-  registry.entries = registry.entries.filter((candidate) => candidate !== entry);
+  const [removed] = await dropEntries(registry, [entry]);
+  return removed;
+}
+
+/** The entries of a collection, in registry order. The match ignores case. */
+export function entriesInCollection(entries: RegistryEntry[], collection: string): RegistryEntry[] {
+  const wanted = collection.trim().toLowerCase();
+  return entries.filter((entry) => entry.collection?.name.toLowerCase() === wanted);
+}
+
+/** Each collection name that the entries use, once, sorted. */
+export function collectionNames(entries: RegistryEntry[]): string[] {
+  const names = new Set(
+    entries.flatMap((entry) => (entry.collection ? [entry.collection.name] : [])),
+  );
+  return [...names].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Forget every bundle of a collection and delete their stored copies. Dev
+ * sources are left alone. Fails when no registered bundle is in that collection.
+ */
+export async function removeCollectionFromRegistry(
+  collection: string,
+): Promise<{ entry: RegistryEntry; storeRemoved: boolean }[]> {
+  const registry = await readRegistry();
+  const members = entriesInCollection(registry.entries, collection);
+
+  if (members.length === 0) {
+    const known = collectionNames(registry.entries);
+    throw new HcmError(
+      `No registered bundle is in the collection "${collection}"`,
+      known.length > 0
+        ? `Known collections: ${known.join(', ')}`
+        : 'No registered bundle is in a named collection. ' +
+            '"hcm registry list" shows the collection of each bundle.',
+    );
+  }
+
+  return dropEntries(registry, members);
+}
+
+/** Take entries out of the registry, write it, then delete their stored copies. */
+async function dropEntries(
+  registry: RegistryFile,
+  entries: RegistryEntry[],
+): Promise<{ entry: RegistryEntry; storeRemoved: boolean }[]> {
+  const dropped = new Set(entries);
+  registry.entries = registry.entries.filter((candidate) => !dropped.has(candidate));
   await writeRegistry(registry);
 
-  const storeRemoved = entry.store ? await removeFromStore(entry.store) : false;
-  return { entry, storeRemoved };
+  const removed: { entry: RegistryEntry; storeRemoved: boolean }[] = [];
+  for (const entry of entries) {
+    const storeRemoved = entry.store ? await removeFromStore(entry.store) : false;
+    removed.push({ entry, storeRemoved });
+  }
+  return removed;
 }
 
 /**

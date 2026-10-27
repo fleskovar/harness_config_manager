@@ -22,6 +22,32 @@ The harness ids are `claude-code`, `copilot`, `copilot-cli`, `reasonix`,
 `opencode` and `pi`. hcm refuses to install a bundle into a harness that
 `targets` does not list.
 
+## Collection manifest: `hcm_manifest.yml`
+
+A folder that holds more than one bundle can have this file in its root. The
+file names `hcm_manifest.yaml` and `hcm_manifest.json` also work. The procedures
+are in [the collections guide](./collections.md).
+
+```yaml
+collection: acme-agent-kits   # optional; the collection name of each bundle in the registry
+bundles:                      # optional; the bundle folders, relative to this file
+  - review-kit
+  - bundles/db-kit
+```
+
+| Field | Rules |
+| --- | --- |
+| `collection` | Letters, digits, dots, dashes and underscores. Start with a letter or a digit. hcm ignores the case of collection names. |
+| `bundles` | A list with one or more folders. Each folder must contain an `hcm.yaml`, and must be inside the collection folder. A path cannot be in the list two times. |
+
+- Without `bundles`, hcm reads each direct subfolder that contains an `hcm.yaml`.
+- With `bundles`, hcm reads only the listed folders, in the list order.
+- An empty file is valid. The folder is then a collection with no name.
+- hcm refuses a folder that contains `hcm.yaml` and `hcm_manifest.yml`.
+- hcm reads the file only when a command gets the collection folder. A bundle that the user registers from its own folder gets no collection name.
+- `hcm registry add --collection <name>` replaces `collection`.
+- Another source can already use the name in the registry of the user. Then hcm asks the user to join, rename or abort. See [Name clashes](./collections.md#name-clashes).
+
 ## Resource kinds
 
 ### Subagent: `subagents/<name>.md`

@@ -20,7 +20,7 @@ hcm install my-cli -t claude-code
 3. Include the bundle folder in the package. For npm, add the folder to `files` in `package.json`. For Python, add it as package data. For a single binary, embed it.
 4. Add the `my-cli hcm init` subcommand. See [What hcm init does](#what-hcm-init-does).
 5. Add a `--dev` option to `my-cli hcm init` for the developers of the tool. See [Development mode](#development-mode).
-6. Optional: add `my-cli hcm remove`. It runs `hcm registry remove my-cli`.
+6. Optional: add `my-cli hcm remove`. It runs `hcm registry remove my-cli`. If the tool ships a collection, it runs `hcm registry remove --collection <name>`. See [More than one bundle](./SKILL.md#more-than-one-bundle).
 7. Test the subcommands as the shared rules tell, and with the steps in [Test development mode](#test-development-mode).
 8. Document the two commands for your users: `my-cli hcm init`, then `hcm install my-cli -t <harness>`.
 

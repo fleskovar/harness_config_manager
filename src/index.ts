@@ -1,5 +1,12 @@
 /** Programmatic entry point, for using hcm as a library. */
-export { discoverBundleDirs, loadBundle, loadManifest, validateBundle } from './core/bundle.js';
+export {
+  discoverBundleDirs,
+  discoverBundles,
+  loadBundle,
+  loadManifest,
+  validateBundle,
+} from './core/bundle.js';
+export { type CollectionManifest, loadCollectionManifest } from './core/collection.js';
 export { readConfig, resolveCacheDir, writeConfig } from './core/config.js';
 export {
   appendContext,
@@ -72,7 +79,13 @@ export {
   suggestFixes,
 } from './core/refs.js';
 export { auditInstallation, rollback } from './core/rollback.js';
-export { addToRegistry, readRegistry, resolveBundle, resolveBundles } from './core/registry.js';
+export {
+  addToRegistry,
+  readRegistry,
+  removeCollectionFromRegistry,
+  resolveBundle,
+  resolveBundles,
+} from './core/registry.js';
 export { findInstallations, readState, upsertInstallation } from './core/state.js';
 export { getTarget, TARGETS, TARGET_IDS } from './targets/index.js';
 export * from './core/types.js';
