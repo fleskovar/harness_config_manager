@@ -1,5 +1,5 @@
 name: hcm
-version: 0.1.2
+version: 0.1.3
 description: Skills and instructions for agents that install hcm bundles, write hcm bundles, or connect a CLI tool or a library to hcm.
 author: harness-config-manager
 homepage: https://github.com/fleskovar/harness_config_manager

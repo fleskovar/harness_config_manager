@@ -1,6 +1,6 @@
 {
   "name": "harness-config-manager",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Define agents, skills, commands, rules and MCP servers once; install them into Claude Code, GitHub Copilot, GitHub Copilot CLI, Reasonix, OpenCode and Pi with exact, item-level rollback.",
   "author": "Francisco Leskovar <francisco.leskovar@gmail.com>",
   "homepage": "https://github.com/fleskovar/harness_config_manager#readme",
