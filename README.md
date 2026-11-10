@@ -63,6 +63,7 @@ hcm install my-kit               # install into every supported target
 hcm install my-kit -t claude pi  # ...or just the harnesses you mean
 hcm install 1 2 3 -t reasonix    # several bundles in one go
 hcm list --installed             # what is installed here?
+hcm list --analysis              # which bundle brought which file?
 hcm status                       # is it all still intact?
 hcm update                       # re-read the sources, reinstall everything here
 hcm context append               # put back context an agent overwrote
@@ -1270,8 +1271,10 @@ hcm install my-kit --on-conflict prompt     # ask even where hcm would not have
 | `hcm install <bundle...>` | Install, with whatever it requires. `-t/--target`, `-f/--flavor`, `-s/--scope`, `--param`, `--params-file`, `--no-prompt`, `--dry-run`, `--force`, `--on-conflict`, `--refresh`, `--no-deps`, `--pi-subagents`, `--track registry\|source` |
 | `hcm update [<bundle...>\|all]` | Re-read bundles from the registry or from their sources, and reinstall them in place. No argument: everything installed here; `all`: that, and everything registered. `-t`, `-f`, `-s`, `--param`, `--params-file`, `--reconfigure`, `--no-prompt`, `--dry-run`, `--force`, `--on-conflict`, `--pi-subagents`, `--track registry\|source`, `--from <source>`, `--no-registry` |
 | `hcm uninstall <bundle...>` | Remove exactly what was installed. `-t`, `-s`, `--dry-run`, `--force`, `--cascade`, `--ignore-dependents`, `--keep-orphans` |
-| `hcm list` | Registered bundles (`●` = installed somewhere). `--descriptions`, `--json` |
+| `hcm list` | Registered bundles with their ids and their status in this project (`●` = installed here). A "Local bundles" section shows the bundles that this project installed from its own dependencies, not from the registry. `-v/--verbose` (sources, flavors, parameters), `--descriptions`, `--json` |
 | `hcm list --installed` | Installed bundles. `--scope project\|user\|all`, `--json` |
+| `hcm list -a/--analysis` | Each installed bundle, its items, and the files and file entries of each item. Marks an entry that another bundle also claims. `--scope project\|user\|all`, `--json` |
+| `hcm list ... -o/--output <file>` | Write any `hcm list` output to a file, without colors |
 | `hcm info <bundle...>` | Contents, its flavors and parameters, plus where every item would land in each target. `-f/--flavor`, `--param`, `--params-file`, `--pi-subagents` |
 | `hcm params [list] [bundle...]` | The parameter values each installation was rendered with. `-t`, `-s`, `--json` |
 | `hcm params init [bundle...]` | Write a parameters file to fill in and pass back with `--params-file`. Omit the bundles for everything installed here. `-t`, `-f`, `-s`, `-o/--output`, `--stdout`, `--force` |
@@ -1473,7 +1476,7 @@ hcm install my-kit          # picks up the edit; nothing to refresh
 Dev entries are marked `[dev]` in `hcm list`, are read from your directory every
 time, and never have a copy in the store — so `hcm registry remove` unregisters
 them without touching your files. The listings read them live too: add a flavor
-or a parameter to `my-kit/hcm.yaml` and `hcm list` says so at once, with no
+or a parameter to `my-kit/hcm.yaml` and `hcm list --verbose` says so at once, with no
 `hcm update` in between. A registered *snapshot* is the other way round — `hcm
 list` describes the copy in the store, which is what an install would write,
 until `hcm update` moves it. `--dev` is refused for remote sources: there

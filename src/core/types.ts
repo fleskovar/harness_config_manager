@@ -356,8 +356,27 @@ export interface RegistryFile {
 // Receipts -- the rollback ledger
 // ---------------------------------------------------------------------------
 
+/**
+ * The bundle item that a receipt belongs to, for example the skill
+ * `dependency-audit`. One item can leave many receipts: a skill is many files.
+ * `hcm list --analysis` groups receipts by it.
+ */
+export interface ReceiptItem {
+  kind: ResourceKind;
+  /** The name of the item as installed, after a rename by a conflict. */
+  name: string;
+}
+
+/**
+ * Fields that every receipt can have. `item` is absent in records written
+ * before hcm recorded it. `hcm update` writes it again.
+ */
+interface ReceiptBase {
+  item?: ReceiptItem;
+}
+
 /** A whole file we wrote. */
-export interface FileReceipt {
+export interface FileReceipt extends ReceiptBase {
   op: 'file';
   /** Scope-root-relative POSIX path. */
   path: string;
@@ -372,7 +391,7 @@ export interface FileReceipt {
 }
 
 /** A value merged into a JSON document at `pointer` (a list of object keys). */
-export interface JsonValueReceipt {
+export interface JsonValueReceipt extends ReceiptBase {
   op: 'json-value';
   path: string;
   pointer: string[];
@@ -386,7 +405,7 @@ export interface JsonValueReceipt {
 }
 
 /** Items appended to a JSON array; removed by value hash, so order is irrelevant. */
-export interface JsonArrayItemReceipt {
+export interface JsonArrayItemReceipt extends ReceiptBase {
   op: 'json-array-item';
   path: string;
   pointer: string[];
@@ -395,7 +414,7 @@ export interface JsonArrayItemReceipt {
 }
 
 /** A marker-delimited block in a comment-supporting text format. */
-export interface BlockReceipt {
+export interface BlockReceipt extends ReceiptBase {
   op: 'block';
   path: string;
   blockId: string;

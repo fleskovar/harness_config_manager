@@ -16,8 +16,8 @@ exact options of the installed version, run `hcm <command> --help`.
 
 1. Run `hcm --version`. If the command is not found, tell the user to install hcm with `npm install -g harness-config-manager`.
 2. Run `hcm targets`. The output shows the harnesses that this folder uses, and the files that two harnesses share.
-3. Run `hcm list`. The output shows the bundles that you can install, with their ids. A `●` marks a bundle that is installed.
-4. Run `hcm list --installed`. The output shows the bundles of this project. A `[source]` mark shows a bundle that `hcm update` reads from its own folder or repository, not from the registry.
+3. Run `hcm list`. The output shows the bundles that you can install, with their ids. A `●` marks a bundle that is installed in this project. The "Local bundles" section shows the bundles that come from a dependency of this project, not from the registry. For sources, flavors and parameters, add `--verbose`.
+4. Run `hcm list --installed`. The output shows the bundles of this project. A `[source]` mark shows a bundle that `hcm update` reads from its own folder or repository, not from the registry. To find the bundle that wrote a file, run `hcm list --analysis`.
 
 The npm package name is `harness-config-manager`. The npm package `hcm` is a
 different program.

@@ -14,7 +14,11 @@
         {
           "op": "file",
           "path": ".claude/skills/my-lib/SKILL.md",
-          "hash": "62a1152f37fbb1621bb429e6505787e8c52384862ce26f229fab80e4a9a7ece7"
+          "hash": "62a1152f37fbb1621bb429e6505787e8c52384862ce26f229fab80e4a9a7ece7",
+          "item": {
+            "kind": "skill",
+            "name": "my-lib"
+          }
         }
       ]
     }

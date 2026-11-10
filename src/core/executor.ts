@@ -18,7 +18,12 @@ import {
 import { hashValue, sha256, valuesEqual } from './hash.js';
 import { upsertBlock } from '../merge/blocks.js';
 import { appendArrayItems, type JsonObject, setAtPointer } from '../merge/json-merge.js';
-import type { InstallPlan, PlanAction, Receipt } from './types.js';
+import type { InstallPlan, PlanAction, Receipt, ReceiptItem } from './types.js';
+
+/** The bundle item that an action writes, for its receipt. See `ReceiptItem`. */
+function itemOf(action: PlanAction): { item?: ReceiptItem } {
+  return action.resource ? { item: { kind: action.resource.kind, name: action.resource.name } } : {};
+}
 
 export async function applyPlan(plan: InstallPlan): Promise<Receipt[]> {
   const receipts: Receipt[] = [];
@@ -47,6 +52,7 @@ export async function applyPlan(plan: InstallPlan): Promise<Receipt[]> {
           path: relativePath,
           hash: sha256(contents),
           ...(action.adopt ? { preexisting: true } : {}),
+          ...itemOf(action),
         });
       }
       continue;
@@ -85,7 +91,7 @@ async function applyBlocks(
     if (action.payload.kind !== 'block') continue;
     const { blockId, syntax, body } = action.payload;
     content = upsertBlock(content, syntax, blockId, body);
-    receipts.push({ op: 'block', path: relativePath, blockId, syntax });
+    receipts.push({ op: 'block', path: relativePath, blockId, syntax, ...itemOf(action) });
   }
 
   await writeText(absolutePath, content);
@@ -118,6 +124,7 @@ async function applyJson(
           hash: hashValue(value),
           hadPrevious: false,
           ...(action.adopt ? { preexisting: true } : {}),
+          ...itemOf(action),
         });
         continue;
       }
@@ -136,6 +143,7 @@ async function applyJson(
         hash: hashValue(value),
         hadPrevious: overwrote,
         ...(overwrote ? { previous: result.previous } : {}),
+        ...itemOf(action),
       });
       continue;
     }
@@ -159,6 +167,7 @@ async function applyJson(
         path: relativePath,
         pointer,
         hashes: [...hashes],
+        ...itemOf(action),
       });
     }
   }

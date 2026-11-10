@@ -20,7 +20,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { installCommand, type InstallOptions } from '../src/commands/install.js';
-import { listCommand } from '../src/commands/list.js';
+import { listCommand, localBundles, projectStatuses } from '../src/commands/list.js';
 import { updateCommand } from '../src/commands/update.js';
 import { configureLogger } from '../src/core/logger.js';
 import { addToRegistry, readRegistry } from '../src/core/registry.js';
@@ -31,7 +31,7 @@ import {
   sameOrigin,
   sourceInProject,
 } from '../src/core/tracking.js';
-import type { InstallationRecord } from '../src/core/types.js';
+import type { InstallationRecord, RegistryEntry, Scope } from '../src/core/types.js';
 import { makeWorkspace, readText } from './support/fixtures.js';
 
 let workspace: string;
@@ -372,6 +372,152 @@ describe('hcm list --installed', () => {
     expect(printed).toContain('[source]');
     expect(printed).toContain(`follows ${VENV_BUNDLE}`);
     expect(printed).toContain('the registry has v1.0.0');
+  });
+});
+
+describe('hcm list', () => {
+  /** The lines of one section of a listing: from its header to the next blank line. */
+  function section(printed: string, header: string): string[] {
+    const lines = printed.split('\n');
+    const start = lines.findIndex((line) => line.startsWith(header));
+    if (start < 0) return [];
+    const end = lines.findIndex((line, index) => index > start && line.trim() === '');
+    return lines.slice(start + 1, end < 0 ? undefined : end);
+  }
+
+  it('shows a bundle from the .venv of the project in the local section', async () => {
+    await writeBundle(venvCopy, '2.0.0');
+    await install([venvCopy]);
+
+    const printed = await capture(() => listCommand({ cwd: projectDir }));
+    const local = section(printed, 'Local bundles');
+
+    expect(local).toHaveLength(1);
+    expect(local[0]).toMatch(/● my-lib\s+v2\.0\.0\s+\.venv\/lib\/site-packages\/my_lib\/hcm_bundle/);
+    expect(section(printed, 'Registry').join('\n')).not.toContain('my-lib');
+  });
+
+  it('shows a bundle installed from the registry in the registry section only', async () => {
+    await writeBundle(globalCopy, '1.0.0');
+    await addToRegistry(globalCopy, workspace);
+    await install(['my-lib']);
+
+    const printed = await capture(() => listCommand({ cwd: projectDir }));
+
+    expect(section(printed, 'Registry').find((line) => line.includes('my-lib'))).toMatch(
+      /● \S+\s+my-lib\s+installed$/,
+    );
+    expect(printed).not.toContain('Local bundles');
+  });
+
+  it('marks a registered bundle that the project installed from its own source', async () => {
+    await writeBundle(globalCopy, '1.0.0');
+    await addToRegistry(globalCopy, workspace);
+    await writeBundle(venvCopy, '2.0.0');
+    await install([venvCopy], { track: 'source' });
+
+    const printed = await capture(() => listCommand({ cwd: projectDir }));
+
+    expect(section(printed, 'Registry').find((line) => line.includes('my-lib'))).toContain(
+      'installed (local source)',
+    );
+    expect(section(printed, 'Local bundles').join('\n')).toContain('my-lib');
+  });
+
+  it('keeps sources out of the default listing, and shows them with --verbose', async () => {
+    await writeBundle(globalCopy, '1.0.0');
+    await addToRegistry(globalCopy, workspace);
+
+    const compact = await capture(() => listCommand({ cwd: projectDir }));
+    const detailed = await capture(() => listCommand({ verbose: true, cwd: projectDir }));
+
+    expect(compact).not.toContain(globalCopy);
+    expect(compact).toMatch(/○ \S+\s+my-lib\s+not installed$/m);
+    expect(detailed).toContain(globalCopy);
+    expect(detailed).toMatch(/my-lib v1\.0\.0/);
+  });
+
+  it('shows the targets of a local bundle and the registry gap with --verbose', async () => {
+    await writeBundle(globalCopy, '1.0.0');
+    await addToRegistry(globalCopy, workspace);
+    await writeBundle(venvCopy, '2.0.0');
+    await install([venvCopy], { track: 'source' });
+
+    const printed = await capture(() => listCommand({ verbose: true, cwd: projectDir }));
+    const local = section(printed, 'Local bundles').join('\n');
+
+    expect(local).toContain(`follows ${VENV_BUNDLE} · the registry has v1.0.0`);
+    expect(local).toContain('→ claude-code');
+  });
+});
+
+describe('projectStatuses', () => {
+  const entry = (name: string, extra: Partial<RegistryEntry> = {}): RegistryEntry => ({
+    id: name,
+    name,
+    source: { type: 'local', path: `/bundles/${name}` },
+    ...extra,
+  });
+  const at = (bundle: string, scope: Scope, extra: Partial<InstallationRecord> = {}) =>
+    ({ bundle, scope, target: 'claude-code', version: '1.0.0', ...extra }) as InstallationRecord;
+
+  it('tells the four statuses apart', () => {
+    const entries = [entry('here'), entry('pinned'), entry('elsewhere'), entry('nowhere')];
+    const statuses = projectStatuses(
+      entries,
+      [at('here', 'project'), at('pinned', 'project', { track: 'source' })],
+      [at('elsewhere', 'user'), at('here', 'user')],
+    );
+
+    expect(Object.fromEntries(statuses)).toEqual({
+      here: 'installed',
+      pinned: 'local',
+      elsewhere: 'user',
+      nowhere: 'absent',
+    });
+  });
+
+  it('counts a bundle as installed when one harness of two follows the registry', () => {
+    const statuses = projectStatuses(
+      [entry('split')],
+      [
+        at('split', 'project', { track: 'source' }),
+        at('split', 'project', { target: 'copilot' }),
+      ],
+      [],
+    );
+
+    expect(statuses.get('split')).toBe('installed');
+  });
+
+  it('never counts a built-in bundle as local', () => {
+    const statuses = projectStatuses(
+      [entry('hcm', { builtin: true })],
+      [at('hcm', 'project', { track: 'source' })],
+      [],
+    );
+
+    expect(statuses.get('hcm')).toBe('installed');
+  });
+});
+
+describe('localBundles', () => {
+  it('lists an unregistered bundle once, with every harness it went into', () => {
+    const records = [
+      { bundle: 'my-lib', scope: 'project', target: 'claude-code', version: '2.0.0', sourceInProject: '.venv/b', source: { type: 'local', path: '/p/.venv/b' } },
+      { bundle: 'my-lib', scope: 'project', target: 'copilot', version: '2.0.0', sourceInProject: '.venv/b', source: { type: 'local', path: '/p/.venv/b' } },
+    ] as InstallationRecord[];
+
+    expect(localBundles(records, [])).toEqual([
+      {
+        name: 'my-lib',
+        version: '2.0.0',
+        source: '.venv/b',
+        targets: ['claude-code', 'copilot'],
+        flavors: [],
+        auto: false,
+      },
+    ]);
   });
 });
 

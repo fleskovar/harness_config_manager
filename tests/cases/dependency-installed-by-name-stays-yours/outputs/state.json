@@ -14,12 +14,20 @@
         {
           "op": "file",
           "path": ".claude/agents/ticket-triager.md",
-          "hash": "59de9e205327fc76eabbeb5eee5a3cdb5526e40177a86b7d9b9707daf920f393"
+          "hash": "59de9e205327fc76eabbeb5eee5a3cdb5526e40177a86b7d9b9707daf920f393",
+          "item": {
+            "kind": "subagent",
+            "name": "ticket-triager"
+          }
         },
         {
           "op": "file",
           "path": ".claude/skills/jira-board/SKILL.md",
-          "hash": "65c6fc40dc7014f50281bfaf90bb5bf23107c8810e65b9659c1d9ded223534b5"
+          "hash": "65c6fc40dc7014f50281bfaf90bb5bf23107c8810e65b9659c1d9ded223534b5",
+          "item": {
+            "kind": "skill",
+            "name": "jira-board"
+          }
         },
         {
           "op": "json-array-item",
@@ -28,7 +36,11 @@
             "permissions",
             "allow"
           ],
-          "hashes": []
+          "hashes": [],
+          "item": {
+            "kind": "settings",
+            "name": "settings"
+          }
         }
       ]
     }

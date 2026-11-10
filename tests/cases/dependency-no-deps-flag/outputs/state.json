@@ -14,12 +14,20 @@
         {
           "op": "file",
           "path": ".claude/agents/sprint-planner.md",
-          "hash": "fe3abaf888fda7b58396c30b901fab5574b16c0755e4fa31feaa476936ef1d48"
+          "hash": "fe3abaf888fda7b58396c30b901fab5574b16c0755e4fa31feaa476936ef1d48",
+          "item": {
+            "kind": "subagent",
+            "name": "sprint-planner"
+          }
         },
         {
           "op": "file",
           "path": ".claude/skills/jira-board/SKILL.md",
-          "hash": "65c6fc40dc7014f50281bfaf90bb5bf23107c8810e65b9659c1d9ded223534b5"
+          "hash": "65c6fc40dc7014f50281bfaf90bb5bf23107c8810e65b9659c1d9ded223534b5",
+          "item": {
+            "kind": "skill",
+            "name": "jira-board"
+          }
         },
         {
           "op": "json-array-item",
@@ -31,7 +39,11 @@
           "hashes": [
             "9494d97a3a0cffe69a34b9bae743f33a17fbc4d8f7e5ffe7b50fadc9501013c5",
             "1f1cd7cc578d614f5b5e229faba9c1d261b5889feedad1d39ebeca218af9db17"
-          ]
+          ],
+          "item": {
+            "kind": "settings",
+            "name": "settings"
+          }
         }
       ]
     }

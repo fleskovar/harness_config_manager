@@ -31,8 +31,10 @@ options.
 
 | Command | What it does |
 | --- | --- |
-| `hcm list` | The available bundles, with ids. `●` marks an installed bundle. `--descriptions`, `--json`. |
+| `hcm list` | The available bundles, with ids and the status in this project. `●` marks a bundle that is installed here. The "Local bundles" section shows the bundles from the dependencies of this project. `-v/--verbose`, `--descriptions`, `--json`. |
 | `hcm list --installed` | The installed bundles. `--scope project\|user\|all`, `--json`. |
+| `hcm list --analysis` | Each installed bundle, its items, and the files of each item. `-a`, `--scope`, `--json`. |
+| `hcm list ... --output <file>` | Write the output of `hcm list` to a file. `-o`. |
 | `hcm info <bundle...>` | The contents of a bundle, its flavors and parameters, and the destination of each item in each harness. |
 | `hcm status` | The harnesses of this folder, and if each installed item is present and not changed. |
 | `hcm targets` | The supported harnesses, their paths, and the files that two harnesses share. |

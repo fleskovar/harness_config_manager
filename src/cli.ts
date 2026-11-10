@@ -339,10 +339,18 @@ program
 
 program
   .command('list')
-  .description('list available bundles, or installed ones with --installed')
+  .description(
+    'list available bundles and their status in this project ' +
+      '(-v, --verbose for sources, flavors and parameters), installed ones with --installed, ' +
+      'or the files of each installed bundle with --analysis',
+  )
   .option('-i, --installed', 'list installed bundles instead of registered ones')
+  .option(
+    '-a, --analysis',
+    'list each installed bundle with its items, and the files and entries of each item',
+  )
   .addOption(
-    new Option('-s, --scope <scope>', 'scope to inspect with --installed').choices([
+    new Option('-s, --scope <scope>', 'scope to inspect with --installed or --analysis').choices([
       'project',
       'user',
       'all',
@@ -350,12 +358,17 @@ program
   )
   .option('--json', 'machine-readable output')
   .option('--descriptions', 'include each bundle\'s description')
-  .action(async (options) => {
+  .option('-o, --output <file>', 'write the listing to this file, not to the console')
+  // `-v, --verbose` is a global option, so it is read with the globals.
+  .action(async (options, command: Command) => {
     await listCommand({
       installed: options.installed,
+      analysis: options.analysis,
       scope: options.scope as Scope | 'all' | undefined,
       json: options.json,
       descriptions: options.descriptions,
+      verbose: command.optsWithGlobals<{ verbose?: boolean }>().verbose ?? false,
+      ...(options.output !== undefined ? { output: options.output as string } : {}),
       cwd,
     });
   });

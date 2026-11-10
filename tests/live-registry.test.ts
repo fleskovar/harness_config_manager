@@ -120,7 +120,8 @@ async function capture(run: () => Promise<void>): Promise<string> {
   return lines.join('\n');
 }
 
-const list = (): Promise<string> => capture(() => listCommand({ cwd: projectDir }));
+// The detailed listing: the flavors and parameters show only with --verbose.
+const list = (): Promise<string> => capture(() => listCommand({ verbose: true, cwd: projectDir }));
 
 /**
  * The lines a listing printed for one bundle: its own line and the indented
