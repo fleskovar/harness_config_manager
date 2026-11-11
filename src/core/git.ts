@@ -11,6 +11,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { HcmError } from './errors.js';
 import { fs, isDirectory, removeDir, writeBytes } from './fsx.js';
+import { downloadWithGit } from './git-cli.js';
 import { downloadGitTree } from './git-http.js';
 import { cacheDir } from './paths.js';
 import type { BundleSource } from './types.js';
@@ -50,10 +51,17 @@ export interface FetchOptions {
  *
  * An Azure DevOps browser URL has the same data in its query string
  * (`?path=/bundles/my-kit&version=GBmain`), and that is read too.
+ *
+ * SSH and git:// URLs are read too, and the `git` program downloads them --
+ * see `git-cli.ts`. The scp-like form is stored in the `ssh://` form:
+ *
+ *   git@ssh.dev.azure.com:v3/org/project/repo     Azure DevOps over SSH
+ *   ssh://git@gitlab.com/group/repo.git           the protocol form
+ *   git+ssh://git@github.com:owner/repo.git       pip style, with an scp-like path
  */
 export function parseGitSource(input: string): GitSource | undefined {
-  const trimmed = input.trim().replace(/^git\+/i, '');
-  if (!/^https?:\/\//i.test(trimmed)) return undefined;
+  const trimmed = toSshUrl(input.trim().replace(/^git\+/i, ''));
+  if (!/^(?:https?|ssh|git):\/\//i.test(trimmed)) return undefined;
 
   let url: URL;
   try {
@@ -102,6 +110,30 @@ export function parseGitSource(input: string): GitSource | undefined {
   };
 }
 
+/**
+ * Write an scp-like SSH address in the `ssh://` form, which `URL` can read:
+ *
+ *   git@host:path          -> ssh://git@host/path
+ *   ssh://git@host:path    -> ssh://git@host/path   (a path, not a port)
+ *
+ * A port is digits only, so `ssh://git@host:2222/path` stays as it is. The
+ * scp-like form needs the user name: without it, `C:path` would read as a host.
+ */
+export function toSshUrl(input: string): string {
+  const scp = /^([\w.-]+@[\w.-]+):(?!\/\/)(.+)$/.exec(input);
+  if (scp && !/^[a-z][\w+.-]*:\/\//i.test(input)) return `ssh://${scp[1]}/${scp[2]!.replace(/^\/+/, '')}`;
+
+  const hybrid = /^ssh:\/\/([^/@]+@)?([^/:]+):(?!\d+(?:\/|$))([^/].*)$/i.exec(input);
+  if (hybrid) return `ssh://${hybrid[1] ?? ''}${hybrid[2]}/${hybrid[3]}`;
+
+  return input;
+}
+
+/** True for a URL that the `git` program downloads, not the HTTPS client. */
+export function needsGitProgram(url: string): boolean {
+  return !/^https?:\/\//i.test(url);
+}
+
 function safeDecode(value: string): string {
   try {
     return decodeURIComponent(value);
@@ -117,7 +149,7 @@ function safeDecode(value: string): string {
  * GitHub source, which is downloaded another way.
  */
 export function gitReference(source: GitSource): string {
-  const prefix = /^https?:\/\/(?:[^/@]+@)?(?:www\.)?github\.com\//i.test(source.url) ? 'git+' : '';
+  const prefix = /^[a-z]+:\/\/(?:[^/@]+@)?(?:www\.)?github\.com[/:]/i.test(source.url) ? 'git+' : '';
   const ref = source.ref === 'HEAD' ? '' : source.ref;
   const fragment = source.subdir ? `#${ref}:${source.subdir}` : ref ? `#${ref}` : '';
   return `${prefix}${source.url}${fragment}`;
@@ -163,7 +195,9 @@ export async function fetchGitBundle(
 
   // Downloaded in full before the old copy is removed, so a failed download
   // leaves the cache as it was.
-  const { files } = await downloadGitTree({ url: source.url, ref: source.ref });
+  const { files } = needsGitProgram(source.url)
+    ? await downloadWithGit({ url: source.url, ref: source.ref })
+    : await downloadGitTree({ url: source.url, ref: source.ref });
 
   await removeDir(root);
   await fs.mkdir(root, { recursive: true });

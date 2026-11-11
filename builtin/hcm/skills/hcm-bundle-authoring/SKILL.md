@@ -41,6 +41,7 @@ folder name is the resource name.
 7. Preview the result: `hcm info my-kit`. The output shows the destination of each item in each harness.
 8. Test the bundle in an empty folder. See [Test a bundle](#test-a-bundle).
 9. Publish the bundle. Push it to GitHub and tag a version. Users then run `hcm registry add owner/repo/path#v1.0.0`.
+10. Tell users the line for the requirements file of their projects. See [Tell users how to require the bundle](#tell-users-how-to-require-the-bundle).
 
 ## Rules for content
 
@@ -112,6 +113,30 @@ Read [the collections guide](./collections.md) for these tasks:
 - Add a manifest to a folder that already ships more than one bundle.
 - Choose a collection name, and decide on the `bundles` list.
 - Resolve a collection name clash.
+
+## Tell users how to require the bundle
+
+A project can list its bundles in an `hcm-requirements.txt` file. Then each
+person who works on the project gets the same bundles with `hcm install -r`.
+Give your users the line for your bundle in your README:
+
+```
+my-kit @ https://github.com/acme/agent-kits.git@v1.0.0
+my-kit @ git+ssh://git@github.com:acme/agent-kits.git@v1.0.0             # private, over SSH
+my-kit @ https://dev.azure.com/acme/platform/_git/agent-kits@v1.0.0      # Azure DevOps
+```
+
+- The first word is the `name` in `hcm.yaml`, not the folder name.
+- Give the clone URL of the repository. Users do not give the folder of the bundle. hcm finds the bundle by its name.
+- Put the tag of the release after the last `@`. A tag gives each person the same version.
+- If the bundle has flavors, show the option: `--flavor <flavor>`.
+- If a required parameter has no default, show the option: `--param NAME=value`.
+- Do not change the `name` of a published bundle. The requirements files of your users use it.
+
+To test the line, write it in `hcm-requirements.txt` in an empty folder. Then
+run `hcm install -r -t claude-code --no-prompt --dry-run`.
+
+The full syntax is in the requirements file guide of the `hcm-usage` skill.
 
 ## Ship a bundle with your software
 

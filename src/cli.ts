@@ -33,6 +33,7 @@ import {
   registryUpdateCommand,
 } from './commands/registry.js';
 import { refsCheckCommand, refsFixCommand } from './commands/refs.js';
+import { installRequirementsCommand } from './commands/requirements.js';
 import { statusCommand } from './commands/status.js';
 import { targetsCommand } from './commands/targets.js';
 import { uninstallCommand } from './commands/uninstall.js';
@@ -48,6 +49,7 @@ import { ALL_FLAVORS } from './core/flavors.js';
 import { ALL_TARGETS } from './core/harnesses.js';
 import { color, configureLogger, log } from './core/logger.js';
 import { closePrompt } from './core/prompt.js';
+import { DEFAULT_REQUIREMENTS_FILE } from './core/requirements.js';
 import { TRACK_MODES } from './core/tracking.js';
 import type { Scope, TargetOptions, TrackMode } from './core/types.js';
 import { TARGET_IDS } from './targets/index.js';
@@ -210,11 +212,18 @@ const noPromptOption = () =>
 program
   .command('install')
   .argument(
-    '<bundle...>',
+    '[bundle...]',
     'one or more: registered name or id, local path, owner/repo[/subdir][#ref], ' +
-      'GitHub URL, or the HTTPS clone URL of any git host',
+      'GitHub URL, or the HTTPS or SSH clone URL of any git host',
   )
-  .description('install one or more bundles into one or more harnesses')
+  .description(
+    'install one or more bundles into one or more harnesses, ' +
+      `or every bundle of a requirements file with -r (default: ${DEFAULT_REQUIREMENTS_FILE})`,
+  )
+  .option(
+    '-r, --requirements [file]',
+    `install the bundles that a requirements file lists (default: ${DEFAULT_REQUIREMENTS_FILE})`,
+  )
   .addOption(targetOption())
   .addOption(flavorOption())
   .addOption(scopeOption())
@@ -228,16 +237,14 @@ program
   .option('--no-deps', 'install only this bundle, not the ones it requires')
   .addOption(trackOption())
   .addOption(piSubagentsOption())
-  .action(async (bundles, options) => {
-    await installCommand(bundles, {
+  .action(async (bundles: string[], options) => {
+    const shared = {
       targets: options.target,
       flavors: options.flavor,
       scope: options.scope as Scope,
       dryRun: options.dryRun,
       force: options.force,
       onConflict: options.onConflict as ConflictPolicy | undefined,
-      refresh: options.refresh,
-      ...(options.track ? { track: options.track as TrackMode } : {}),
       // commander gives --no-deps as deps: false, and --no-prompt as prompt: false
       noDeps: options.deps === false,
       params: options.param as string[] | undefined,
@@ -245,6 +252,41 @@ program
       prompt: options.prompt !== false,
       targetOptions: targetOptionsFrom(options),
       cwd,
+    };
+
+    if (options.requirements !== undefined) {
+      if (bundles.length > 0) {
+        throw new HcmError(
+          'Give bundle names or -r, not both',
+          'Add the bundles to the requirements file, or install them with a second command.',
+        );
+      }
+      if (options.track) {
+        throw new HcmError(
+          '--track does not apply to -r',
+          'A line with a source follows that source. A line with a name only follows the registry.',
+        );
+      }
+      // `-r` with no file name is `true`; the command then reads the default file.
+      const file = typeof options.requirements === 'string' ? options.requirements : undefined;
+      await installRequirementsCommand(file, {
+        ...shared,
+        ...(options.refresh !== undefined ? { refresh: options.refresh as boolean } : {}),
+      });
+      return;
+    }
+
+    if (bundles.length === 0) {
+      throw new HcmError(
+        'Name at least one bundle to install',
+        `Or install the bundles of ${DEFAULT_REQUIREMENTS_FILE} with "hcm install -r".`,
+      );
+    }
+
+    await installCommand(bundles, {
+      ...shared,
+      refresh: options.refresh,
+      ...(options.track ? { track: options.track as TrackMode } : {}),
     });
   });
 

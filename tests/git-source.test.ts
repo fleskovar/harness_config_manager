@@ -121,10 +121,32 @@ describe('a clone URL as a source', () => {
     expect(error.message).toMatch(/outside the repository/);
   });
 
-  it('leaves everything that is not an HTTP URL alone', () => {
-    for (const input of ['./my-kit', 'acme/my-kit', 'C:/local/my-kit', 'git@host:acme/kit.git', '']) {
+  it('leaves everything that is not a git URL alone', () => {
+    for (const input of ['./my-kit', 'acme/my-kit', 'C:/local/my-kit', 'C:my-kit', '']) {
       expect(parseGitSource(input)).toBeUndefined();
     }
+  });
+
+  it('reads an SSH URL in the ssh:// form, whichever form it was written in', () => {
+    const cases: [string, string][] = [
+      ['git@ssh.dev.azure.com:v3/acme/platform/agent-kits', 'ssh://git@ssh.dev.azure.com/v3/acme/platform/agent-kits'],
+      ['git@bitbucket.org:acme/agent-kits.git', 'ssh://git@bitbucket.org/acme/agent-kits.git'],
+      ['ssh://git@gitlab.com/acme/agent-kits.git', 'ssh://git@gitlab.com/acme/agent-kits.git'],
+      ['git+ssh://git@github.com:acme/agent-kits.git', 'ssh://git@github.com/acme/agent-kits.git'],
+      ['ssh://git@git.example.com:2222/team/kits.git', 'ssh://git@git.example.com:2222/team/kits.git'],
+    ];
+    for (const [input, url] of cases) {
+      expect(parseGitSource(input)).toEqual({ type: 'git', url, ref: 'HEAD' });
+    }
+  });
+
+  it('reads a ref and a folder from the fragment of an SSH URL', () => {
+    expect(parseGitSource('git@ssh.dev.azure.com:v3/acme/platform/kits#main:bundles/a')).toEqual({
+      type: 'git',
+      url: 'ssh://git@ssh.dev.azure.com/v3/acme/platform/kits',
+      ref: 'main',
+      subdir: 'bundles/a',
+    });
   });
 });
 
@@ -159,17 +181,35 @@ describe('which source a reference becomes', () => {
     });
   });
 
-  it('says why an SSH URL of another host cannot be read', async () => {
+  it('reads an SSH URL of another host with the git program', () => {
     for (const input of [
       'git@ssh.dev.azure.com:v3/acme/platform/agent-kits',
       'git@bitbucket.org:acme/agent-kits.git',
       'ssh://git@gitlab.com/acme/agent-kits.git',
     ]) {
-      const error = await failure(() => parseSource(input, cwd));
-      expect(error.hint).toMatch(/HTTPS clone URL/);
+      expect(parseSource(input, cwd)).toMatchObject({ type: 'git', url: expect.stringMatching(/^ssh:\/\//) });
     }
-    // github.com is the exception: its SSH URL names the same archive.
+    // github.com without git+ stays as it was: its SSH URL names the same archive.
     expect(parseSource('git@github.com:acme/my-kit.git', cwd)).toMatchObject({ type: 'github' });
+    expect(parseSource('git+ssh://git@github.com/acme/my-kit.git', cwd)).toMatchObject({
+      type: 'git',
+      url: 'ssh://git@github.com/acme/my-kit.git',
+    });
+  });
+
+  it('says so when a URL has a scheme that hcm cannot read', async () => {
+    const error = await failure(() => parseSource('ftp://example.com/kits', cwd));
+    expect(error.message).toMatch(/cannot read/);
+  });
+
+  it('writes an SSH source back as a reference that reads back the same', () => {
+    for (const input of [
+      'git+ssh://git@github.com/acme/my-kit.git#v2:bundles/a',
+      'ssh://git@ssh.dev.azure.com/v3/acme/platform/kits#main',
+    ]) {
+      const source = parseSource(input, cwd);
+      expect(parseSource(sourceToReference(source)!, cwd)).toEqual(source);
+    }
   });
 });
 

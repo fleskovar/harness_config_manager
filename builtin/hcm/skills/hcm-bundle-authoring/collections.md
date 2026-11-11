@@ -71,6 +71,24 @@ Each path in the list is relative to the collection root, and must stay inside
 it. Each listed folder must contain an `hcm.yaml`. hcm reads only the listed
 folders.
 
+## Collections in a requirements file
+
+A project can name one bundle of your collection in its `hcm-requirements.txt`
+file:
+
+```
+review-kit @ https://github.com/acme/agent-kits.git@v2.0.0
+```
+
+hcm downloads the repository and finds the bundle by its `name`. It does not
+read the `bundles` list for this search. It searches each folder of the
+repository, to a depth of four folders. Thus:
+
+- Give each bundle in the repository a different `name`. This includes test data and examples. If two folders have the same name, the line of the user fails.
+- Keep each bundle in the first four folder levels of the repository.
+- If a repository must keep two bundles with the same name, tell users to add `#subdirectory=<folder>` to the URL.
+- Tag the repository for each release. One tag then gives a version of each bundle in it.
+
 ## Dependencies between bundles of a collection
 
 hcm finds a dependency in a folder beside the bundle that requires it. Thus:

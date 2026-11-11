@@ -24,6 +24,7 @@ options.
 | Command | What it does |
 | --- | --- |
 | `hcm install <bundle...>` | Install bundles, and the bundles that they require. Also `--no-deps`, `--refresh`, `--pi-subagents`. `--track registry\|source` sets where `hcm update` reads the next version. |
+| `hcm install -r [file]` | Install each bundle of the requirements file of the project. The default file is `hcm-requirements.txt`. Each line is `<bundle> @ <url>[@ref] [--flavor ...] [--target ...] [--param N=v]`, or `<bundle>` for a registered bundle. The URL is HTTPS or SSH, of any git host. See [the requirements file guide](./requirements.md). |
 | `hcm update [<bundle...>\|all]` | Read each bundle again, from the registry or from its source. Install each new version where the old version is. No argument: the bundles of this project. `all`: these, and all registered bundles. `--reconfigure` asks for the parameters again. `--no-registry` reads the recorded sources this time, with no change to the registry. `--track registry\|source` changes the mode. `--from <path\|url>` reads a new source, and follows it from now on. |
 | `hcm uninstall <bundle...>` | Remove exactly what hcm installed. Also `--cascade`, `--ignore-dependents`, `--keep-orphans`. |
 

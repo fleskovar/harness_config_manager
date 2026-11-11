@@ -45,7 +45,7 @@ hcm install my-lib -t claude-code
 
 - The form is `<clone-url>#<ref>:<folder>`. Without a ref, hcm reads the default branch: `<clone-url>#:hcm-bundle`.
 - hcm uses the git protocol over HTTPS, and does not start git. It downloads the files of that ref, but no git history.
-- An SSH URL does not work. Use the HTTPS clone URL.
+- An SSH URL works too, for example `git@ssh.dev.azure.com:v3/org/project/repo#v1.2.0:hcm-bundle`. hcm then runs git, which uses the SSH keys of the user. The machine must have git.
 - For a private repository, the user sets an access token in an environment variable: `HCM_GIT_TOKEN`, or `HCM_GIT_TOKEN_<HOST>` for one host, for example `HCM_GIT_TOKEN_DEV_AZURE_COM`. Do not put the token in the URL. hcm refuses a URL that contains a password.
 - To read a private GitHub repository this way, write `git+` before the URL: `git+https://github.com/owner/repo.git#v1.2.0:hcm-bundle`.
 
@@ -141,6 +141,18 @@ hcm install owner/repo/hcm-bundle#v1.2.0 --track source -t claude-code --no-prom
 - `hcm update` reads the same tag again. A registered `my-lib` in another version does not replace it.
 - To move the project to a new release, run `hcm update my-lib --from owner/repo/hcm-bundle#v1.3.0`. The installation follows the new tag from then on, and keeps its parameter values.
 - Other projects of the user can pin other releases.
+
+A project can also list the bundle in its requirements file,
+`hcm-requirements.txt`. Commit the file with the project:
+
+```
+# hcm-requirements.txt
+my-lib @ https://github.com/owner/repo.git@v1.2.0
+```
+
+Each developer then runs `hcm install -r -t <harness> --no-prompt`. hcm finds
+the bundle `my-lib` in the repository, and the installation follows the tag
+`v1.2.0`. To upgrade, change the tag in the file and run the command again.
 
 A team can also record the bundle version in a `bundles.txt` file. This
 registers the bundle, so all projects of the user share one version. Put the

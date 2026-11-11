@@ -8,6 +8,7 @@
  */
 
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { discoverBundles, findNestedBundleDirs, loadBundle } from './bundle.js';
 import {
   BUILTIN_BUNDLES,
@@ -223,11 +224,12 @@ export function parseSource(input: string, cwd: string): BundleSource {
   const git = parseGitSource(trimmed);
   if (git) return git;
 
-  // Without this, an SSH URL reads as a local path that does not exist.
-  if (/^(?:(?:ssh|git):\/\/|[\w.-]+@[\w.-]+:)/i.test(trimmed)) {
+  // Without this, a URL that hcm cannot read reads as a local path that does not exist.
+  if (/^file:\/\//i.test(trimmed)) return { type: 'local', path: fileURLToPath(trimmed) };
+  if (/^(?:git\+)?[a-z][\w+.-]*:\/\//i.test(trimmed)) {
     throw new HcmError(
-      `"${trimmed}" is an SSH or git:// URL, which hcm reads only for github.com`,
-      'Use the HTTPS clone URL of the repository.',
+      `"${trimmed}" is a URL that hcm cannot read`,
+      'Use an HTTPS, SSH or git:// clone URL of the repository.',
     );
   }
 

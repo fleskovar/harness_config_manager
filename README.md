@@ -1269,6 +1269,7 @@ hcm install my-kit --on-conflict prompt     # ask even where hcm would not have
 | Command | What it does |
 | --- | --- |
 | `hcm install <bundle...>` | Install, with whatever it requires. `-t/--target`, `-f/--flavor`, `-s/--scope`, `--param`, `--params-file`, `--no-prompt`, `--dry-run`, `--force`, `--on-conflict`, `--refresh`, `--no-deps`, `--pi-subagents`, `--track registry\|source` |
+| `hcm install -r [file]` | Install each bundle of a [requirements file](#a-project-requirements-file-hcm-requirementstxt). Default file: `hcm-requirements.txt`. Takes the options of `hcm install`, except `--track` |
 | `hcm update [<bundle...>\|all]` | Re-read bundles from the registry or from their sources, and reinstall them in place. No argument: everything installed here; `all`: that, and everything registered. `-t`, `-f`, `-s`, `--param`, `--params-file`, `--reconfigure`, `--no-prompt`, `--dry-run`, `--force`, `--on-conflict`, `--pi-subagents`, `--track registry\|source`, `--from <source>`, `--no-registry` |
 | `hcm uninstall <bundle...>` | Remove exactly what was installed. `-t`, `-s`, `--dry-run`, `--force`, `--cascade`, `--ignore-dependents`, `--keep-orphans` |
 | `hcm list` | Registered bundles with their ids and their status in this project (`●` = installed here). A "Local bundles" section shows the bundles that this project installed from its own dependencies, not from the registry. `-v/--verbose` (sources, flavors, parameters), `--descriptions`, `--json` |
@@ -1415,7 +1416,8 @@ hcm registry add https://bitbucket.org/workspace/repo.git#:bundles/my-kit   # a 
 - A branch is not a fixed version. `hcm registry update` downloads its latest commit.
 - `hcm` also reads the browser URL of an Azure DevOps folder, with its `path` and `version` parameters.
 - To read a GitHub repository with the git protocol, write `git+` before the URL: `git+https://github.com/owner/repo.git`. Use this form for a private GitHub repository.
-- An SSH URL works only for github.com. For each other host, use the HTTPS clone URL.
+- An SSH URL works for each host: `git@ssh.dev.azure.com:v3/org/project/repo`, `ssh://git@gitlab.com/group/repo.git`. For an SSH URL, `hcm` runs the `git` program, which uses your SSH keys. The machine then needs git.
+- An SSH URL of github.com without `git+` reads the public archive, as before. To read a private GitHub repository over SSH, write `git+ssh://git@github.com/owner/repo.git`.
 - `hcm` does not write symbolic links or submodules.
 
 #### Private repositories
@@ -1767,6 +1769,71 @@ what is already there; entries whose folder has gone missing are re-fetched from
 their source on next use, so a relocated store repopulates itself. A bundle
 registered with `--dev` is never in the store at all — it is read from your
 working directory.
+
+### A project requirements file: `hcm-requirements.txt`
+
+A requirements file lists the bundles that one project uses. Put it in the
+project, and commit it. Then each person who has hcm installs the same bundles
+into that project:
+
+```bash
+hcm install -r                        # reads hcm-requirements.txt
+hcm install -r tools/agents.txt -t claude-code --no-prompt
+```
+
+The syntax follows the direct references of pip's `requirements.txt`. Each line
+is `<bundle> @ <source> [options]`, or `<bundle>` alone:
+
+```
+# hcm-requirements.txt
+my-bundle-1 @ https://github.com/fleskovar/agent_assets.git@branch_a
+my-bundle-3 @ https://github.com/fleskovar/agent_assets.git@branch_b
+my-bundle-4 @ git+ssh://git@github.com:fleskovar/agent_assets.git@branch_c --flavor python
+ado-kit     @ https://dev.azure.com/org/project/_git/kits@v1.2.0
+ado-ssh-kit @ git@ssh.dev.azure.com:v3/org/project/kits@main
+docs-kit    @ ./agents             # a folder, from the folder of this file
+my-bundle-5                        # no source: the bundle registered on this machine
+```
+
+- The name selects one bundle. A repository can hold many bundles, and hcm installs only the bundles that the file names. Above, the file does not name `my-bundle-2`, so hcm does not install it.
+- hcm finds the bundle by the `name` of its manifest. It searches the repository root, its subfolders, and deeper folders. You do not give the folder of the bundle.
+- If two bundles in the source have the same name, add `#subdirectory=<folder>` to the source, as in pip.
+- The ref follows the last `@` of the URL. It is a branch, a tag or a full commit id. Without a ref, hcm reads the default branch. An `@` before the host is a user name, not a ref.
+- A line with no source installs the bundle that is registered on this machine with that name. If no bundle has that name, hcm reports the line and installs nothing.
+- `#` starts a comment, at the start of a line or after a space.
+
+The sources:
+
+| Source | Download |
+| --- | --- |
+| `https://github.com/owner/repo.git[@ref]` | The GitHub archive. Public repositories only |
+| `git+https://github.com/owner/repo.git[@ref]` | The git protocol over HTTPS. A private repository needs `HCM_GIT_TOKEN` |
+| `https://dev.azure.com/org/project/_git/repo[@ref]`, or any other HTTPS clone URL | The git protocol over HTTPS. A private repository needs a [token](#private-repositories) |
+| `git+ssh://git@host/path[@ref]`, `ssh://...`, `git@host:path[@ref]` | The `git` program, with your SSH keys |
+| `./folder`, `../folder`, an absolute path, `file:///...` | Read in place. A relative path starts in the folder of the requirements file |
+
+The options of a line apply to that bundle only. They replace the same option
+of the command line:
+
+| Option | Meaning |
+| --- | --- |
+| `--flavor <flavor...>`, `-f` | Install the common part and these flavors |
+| `--target <harness...>`, `-t` | Install into these harnesses |
+| `--param NAME=value` | Set a parameter of this bundle. Repeat it for more parameters. Put a value that has spaces in quotes |
+
+How the install works:
+
+1. hcm reads all lines, downloads each source, and finds each bundle. A repository that several lines use is downloaded one time.
+2. If a line has an error, hcm reports all errors with their line numbers, and installs nothing.
+3. hcm installs the bundles in the order of the file. One set of answers applies to the whole file: a question about a conflict or a parameter comes one time.
+
+- A line with a source records that source, with its ref, in `.hcm/state.json`. `hcm update` then reads the same branch or tag. It does not read the registry.
+- Each run downloads the sources again, so a branch gives its latest commit. To change the version, change the ref in the file and run `hcm install -r` again.
+- `hcm install -r` does not remove a bundle that you deleted from the file. Remove it with `hcm uninstall <bundle>`.
+
+`bundles.txt`, below, is a different file. It registers bundles on a machine.
+A requirements file installs bundles into one project, and does not change the
+registry.
 
 ### Sharing a setup: `bundles.txt`
 

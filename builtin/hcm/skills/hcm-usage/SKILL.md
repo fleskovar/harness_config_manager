@@ -1,5 +1,5 @@
 ---
-description: Install, update and remove hcm bundles in a project or for the user, and check the result. Also decide if an installation follows the registry or its own source, for example a library bundle in .venv or node_modules, and repair an update whose source moved. Also manage the hcm registry. Use when the user asks to add skills, subagents, commands, rules or MCP servers with hcm, or to change what hcm installed. Also use it to register, group or unregister bundles, for example all bundles of one repository or named collection.
+description: Install, update and remove hcm bundles in a project or for the user, and check the result. Also write, change and install the requirements file of a project, hcm-requirements.txt, that lists the bundles of the project with their sources. Also decide if an installation follows the registry or its own source, for example a library bundle in .venv or node_modules, and repair an update whose source moved. Also manage the hcm registry. Use when the user asks to add skills, subagents, commands, rules or MCP servers with hcm, or to change what hcm installed. Also use it to register, group or unregister bundles, for example all bundles of one repository or named collection.
 ---
 
 # Use hcm
@@ -17,7 +17,8 @@ exact options of the installed version, run `hcm <command> --help`.
 1. Run `hcm --version`. If the command is not found, tell the user to install hcm with `npm install -g harness-config-manager`.
 2. Run `hcm targets`. The output shows the harnesses that this folder uses, and the files that two harnesses share.
 3. Run `hcm list`. The output shows the bundles that you can install, with their ids. A `●` marks a bundle that is installed in this project. The "Local bundles" section shows the bundles that come from a dependency of this project, not from the registry. For sources, flavors and parameters, add `--verbose`.
-4. Run `hcm list --installed`. The output shows the bundles of this project. A `[source]` mark shows a bundle that `hcm update` reads from its own folder or repository, not from the registry. To find the bundle that wrote a file, run `hcm list --analysis`.
+4. Look for an `hcm-requirements.txt` file in the project root. If it is there, the project lists its bundles in it. Read [the requirements file guide](./requirements.md) before you install or change bundles.
+5. Run `hcm list --installed`. The output shows the bundles of this project. A `[source]` mark shows a bundle that `hcm update` reads from its own folder or repository, not from the registry. To find the bundle that wrote a file, run `hcm list --analysis`.
 
 The npm package name is `harness-config-manager`. The npm package `hcm` is a
 different program.
@@ -59,6 +60,33 @@ install for all projects of the user.
 
 To install part of a bundle, give `--flavor <name...>`. `hcm info <bundle>`
 lists the flavors of a bundle.
+
+## The requirements file of a project
+
+A project can list its bundles in `hcm-requirements.txt`, and commit the file.
+Each person who works on the project then installs the same bundles:
+
+```bash
+hcm install -r -t <harness> --no-prompt --dry-run   # preview
+hcm install -r -t <harness> --no-prompt             # install
+```
+
+Each line is `<bundle> @ <source>[@ref] [options]`, or `<bundle>` alone for a
+registered bundle:
+
+```
+review-kit @ https://github.com/acme/agent-kits.git@v2.0.0
+db-kit     @ https://dev.azure.com/acme/platform/_git/kits@v1.4.0
+py-kit     @ git+ssh://git@github.com:acme/agent-kits.git@main --flavor python
+team-kit
+```
+
+- A source can hold many bundles. hcm installs only the bundles that the file names.
+- If a line has an error, hcm installs nothing.
+- When the project uses a requirements file, change the file to add, upgrade or change a bundle. Do not install the bundle with `hcm install <bundle>` only. The next person does not get it.
+
+The syntax, the procedure to write a file, and the errors are in
+[the requirements file guide](./requirements.md).
 
 ## Register a bundle
 
@@ -229,6 +257,7 @@ and remove the hcm sections. hcm keeps a copy of each section in
 
 ## Share a setup
 
+- To give each person of a project the same bundles, write `hcm-requirements.txt`. See [The requirements file of a project](#the-requirements-file-of-a-project).
 - `hcm export` writes the installed bundles to `bundles.txt`.
 - `hcm import bundles.txt --install -t <harness> --no-prompt` registers and installs them on another machine.
 - `hcm params init` writes the parameter values of this project to `params.yaml`. Give that file back with `--params-file params.yaml`.
