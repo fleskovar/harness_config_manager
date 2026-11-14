@@ -7,6 +7,7 @@ import {
   seedRenames,
 } from '../core/conflicts.js';
 import { captureContext } from '../core/context.js';
+import { bundleDigest } from '../core/digest.js';
 import {
   type DependencyGraph,
   formatDependencyTree,
@@ -704,6 +705,7 @@ export async function installInto(
     source: bundle.source,
     ...(inProject ? { sourceInProject: inProject } : {}),
     ...(track ? { track } : {}),
+    digest: await bundleDigest(bundle),
     installedAt: new Date().toISOString(),
     receipts,
     ...(Object.keys(targetOptions).length > 0 ? { targetOptions } : {}),

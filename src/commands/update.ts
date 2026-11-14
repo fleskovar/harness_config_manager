@@ -29,8 +29,10 @@ import {
   installedDependencies,
   resolveDependencyGraph,
 } from '../core/deps.js';
+import { bundleDigest } from '../core/digest.js';
 import { HcmError } from '../core/errors.js';
 import { assertFlavorsAvailable, expandFlavors } from '../core/flavors.js';
+import { valuesEqual } from '../core/hash.js';
 import { describeSource, resolveSource } from '../core/github.js';
 import { expandTargets, requireTargetChoice } from '../core/harnesses.js';
 import { color, log } from '../core/logger.js';
@@ -56,6 +58,7 @@ import {
   effectiveTrack,
   recordedSource,
   sameOrigin,
+  sourceInProject,
   warnIfRegistryDiffers,
 } from '../core/tracking.js';
 import type {
@@ -130,6 +133,18 @@ export interface UpdateOptions {
    * following the registry.
    */
   from?: string;
+  /**
+   * `--ref`: read the recorded repository of each named bundle at this branch,
+   * tag or commit, and follow that ref from now on. The way to move a project
+   * to a new release of a bundle that it installed with `--source`.
+   */
+  ref?: string;
+  /**
+   * `--reinstall`: reinstall each installation, also when its source holds the
+   * same version and the same files. Without it, such an installation is up to
+   * date and stays as it is. Use it to put back a file that was deleted.
+   */
+  reinstall?: boolean;
   cwd: string;
 }
 
@@ -187,6 +202,18 @@ function assertTrackingFlags(options: UpdateOptions): void {
     throw new HcmError(
       '--no-registry and --track registry contradict each other',
       'Use --track registry to follow the registry, or --no-registry to read the sources once.',
+    );
+  }
+  if (options.ref !== undefined && options.from !== undefined) {
+    throw new HcmError(
+      '--ref and --from contradict each other',
+      'Give the ref in the --from source, or use --ref alone.',
+    );
+  }
+  if (options.ref !== undefined && options.track === 'registry') {
+    throw new HcmError(
+      '--ref and --track registry contradict each other',
+      '--ref makes the installation follow its repository at that ref. Use one of the two.',
     );
   }
 }
@@ -287,6 +314,9 @@ async function planUpdate(
   }
 
   const picked = pickRecords(references, records, available, registered);
+  if (options.ref !== undefined) {
+    return { jobs: planRef(options.ref, references, picked.records, options), fromLedger: false };
+  }
   const registryJobs = new Map<string, RegistryJob>();
   const sourceJobs = new Map<string, SourceJob>();
 
@@ -471,6 +501,52 @@ async function planFrom(
 }
 
 /**
+ * `--ref <ref>`: read the recorded repository of each named installation at
+ * this ref, and follow it from now on. The folder in the repository stays the
+ * same, so the user does not have to know it.
+ *
+ * Only named bundles: one ref for each bundle of the project is almost never
+ * what was meant, because the bundles can come from different repositories.
+ */
+function planRef(
+  ref: string,
+  references: string[] | undefined,
+  records: InstallationRecord[],
+  options: UpdateOptions,
+): SourceJob[] {
+  if (!references?.length) {
+    throw new HcmError(
+      '--ref needs the name of a bundle',
+      'Run "hcm update <bundle> --ref <ref>".',
+    );
+  }
+  if (records.length === 0) {
+    throw new HcmError(
+      `${references.join(', ')} is not installed here, so --ref has nothing to move`,
+      'Install it with: hcm install <bundle> --source <repository> --ref <ref>',
+    );
+  }
+
+  const jobs = new Map<string, SourceJob>();
+  for (const record of records) {
+    const recorded = recordedSource(record, options.cwd);
+    if (recorded.type === 'local') {
+      throw new HcmError(
+        `--ref needs a repository, but ${record.bundle} comes from the folder ${describeRecordedSource(record)}`,
+        `Point it at another folder with: hcm update ${record.bundle} --from <path>`,
+      );
+    }
+
+    const source: BundleSource = { ...recorded, ref };
+    const key = `${record.bundle}::${JSON.stringify(source)}`;
+    const job = jobs.get(key) ?? { kind: 'source', bundle: record.bundle, source, records: [], switchTo: 'source' };
+    job.records.push(record);
+    jobs.set(key, job);
+  }
+  return [...jobs.values()].sort((a, b) => a.bundle.localeCompare(b.bundle));
+}
+
+/**
  * The registry entry each installed bundle name belongs to.
  *
  * Mostly a name match. `registry add --name` renames the entry, not the
@@ -564,10 +640,15 @@ async function updateFromRegistry(job: RegistryJob, options: UpdateOptions): Pro
     return;
   }
 
+  const partition = await partitionRecords(bundle, job.records, job.switchTo, options);
+  const { stale } = partition;
+  reportUpToDate(bundle, partition);
+  if (stale.length === 0) return;
+
   // An installation that came from another place is moved onto the registered
   // copy now. That is what following the registry means, but it is worth one
   // line: the user can pin the old source instead.
-  for (const record of job.records) {
+  for (const record of stale) {
     if (record.track || sameOrigin(record.source, bundle.source)) continue;
     log.info(
       color.dim(
@@ -577,7 +658,7 @@ async function updateFromRegistry(job: RegistryJob, options: UpdateOptions): Pro
     );
   }
 
-  await reinstallAll(bundle, job.records, job.switchTo, options);
+  await reinstallAll(bundle, stale, job.switchTo, options);
 }
 
 /**
@@ -620,15 +701,21 @@ async function updateFromSource(job: SourceJob, options: UpdateOptions): Promise
     return;
   }
 
-  const previous = job.records[0]?.version;
+  const partition = await partitionRecords(bundle, job.records, job.switchTo, options);
+  const { stale } = partition;
+  const previous = (stale[0] ?? job.records[0])?.version;
   const mode = job.once ? color.dim(' [source, this time]') : color.magenta(' [source]');
-  log.info(
-    `${color.bold(job.bundle)} ${describeVersion(previous, bundle.manifest.version)}${mode}`,
-  );
+  const version =
+    stale.length === 0
+      ? color.dim(`v${bundle.manifest.version} (up to date)`)
+      : describeVersion(previous, bundle.manifest.version);
+  log.info(`${color.bold(job.bundle)} ${version}${mode}`);
   log.info(color.dim(`  from ${describeSource(bundle.source)}`));
   await warnIfRegistryDiffers(bundle);
 
-  await reinstallAll(bundle, job.records, job.switchTo, options);
+  reportUpToDate(bundle, partition);
+  if (stale.length === 0) return;
+  await reinstallAll(bundle, stale, job.switchTo, options);
 }
 
 /** "v1.0.0 → v1.1.0", or "v1.0.0 (unchanged)". */
@@ -636,6 +723,105 @@ function describeVersion(previous: string | undefined, current: string): string 
   return previous && previous !== current
     ? `${color.dim(`v${previous}`)} → ${color.bold(`v${current}`)}`
     : color.dim(`v${current} (unchanged)`);
+}
+
+// ---------------------------------------------------------------------------
+// Up to date: the same version and the same files
+// ---------------------------------------------------------------------------
+
+/**
+ * Split the records of one job into the installations that need the new
+ * bundle, and the installations that already have it.
+ *
+ * An installation is current when the bundle has its version and its digest,
+ * comes from its source, and this run asks for no other change. A record with
+ * no digest is never current: it was written before digests existed.
+ */
+async function partitionRecords(
+  bundle: LoadedBundle,
+  records: InstallationRecord[],
+  switchTo: TrackMode | undefined,
+  options: UpdateOptions,
+): Promise<RecordPartition> {
+  if (options.reinstall || changesRequested(options)) return { stale: records, current: [] };
+
+  const digest = await bundleDigest(bundle);
+  const stale: InstallationRecord[] = [];
+  const current: InstallationRecord[] = [];
+
+  for (const record of records) {
+    const same =
+      record.version === bundle.manifest.version &&
+      record.digest === digest &&
+      (switchTo === undefined || switchTo === record.track) &&
+      sameRecordedSource(record, bundle, options.cwd);
+    (same ? current : stale).push(record);
+  }
+  return { stale, current, digest };
+}
+
+interface RecordPartition {
+  /** The installations to reinstall. */
+  stale: InstallationRecord[];
+  /** The installations that already have this bundle. */
+  current: InstallationRecord[];
+  /** The digest of the bundle. Absent when the run reinstalls each installation. */
+  digest?: string;
+}
+
+/**
+ * True when this run changes how the bundle is installed, not only which
+ * version. Then each installation is reinstalled, also when its bundle is the
+ * same.
+ */
+function changesRequested(options: UpdateOptions): boolean {
+  const overrides = options.parameterOverrides;
+  const hasOverrides =
+    overrides !== undefined &&
+    (Object.keys(overrides.global).length > 0 ||
+      Object.keys(overrides.byBundle).length > 0 ||
+      Object.keys(overrides.byBundleTarget).length > 0);
+
+  return (
+    options.flavors !== undefined ||
+    options.targetOptions !== undefined ||
+    options.reconfigure === true ||
+    hasOverrides
+  );
+}
+
+/**
+ * True when the record names the place that the bundle came from, with the
+ * same ref. A source inside the project compares by its relative path, because
+ * the absolute path is different in each checkout.
+ */
+function sameRecordedSource(record: InstallationRecord, bundle: LoadedBundle, cwd: string): boolean {
+  if (record.sourceInProject !== undefined) {
+    return sourceInProject(bundle.source, record.scope, cwd) === record.sourceInProject;
+  }
+  return valuesEqual(record.source, bundle.source);
+}
+
+/** One line for each installation that stays as it is. */
+function reportUpToDate(bundle: LoadedBundle, { stale, current, digest }: RecordPartition): void {
+  if (stale.length === 0) {
+    const where = current.map((record) => `${record.target} (${record.scope})`).join(', ');
+    log.info(color.dim(`  up to date in ${where}; nothing to do`));
+    log.info(color.dim('  to install it again anyway, run with --reinstall'));
+    return;
+  }
+
+  for (const record of current) {
+    log.info(color.dim(`  ${record.target} (${record.scope}): up to date`));
+  }
+  const changedFiles = (record: InstallationRecord): boolean =>
+    record.version === bundle.manifest.version &&
+    record.digest !== undefined &&
+    digest !== undefined &&
+    record.digest !== digest;
+  if (stale.some(changedFiles)) {
+    log.info(color.dim(`  the files changed, but the version is still v${bundle.manifest.version}`));
+  }
 }
 
 /**

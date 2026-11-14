@@ -15,7 +15,7 @@ would be worse than no update at all.
 
 | File | What it is | Rows / shape |
 | --- | --- | --- |
-| `inputs/case.json` | register `--dev`, install with `--param`s, update with **none** | 3 steps |
+| `inputs/case.json` | register `--dev`, install with `--param`s, update `--reinstall` with **no** `--param` | 3 steps |
 | `inputs/bundles/branded-kit/` | a bundle full of placeholders | 9 resources |
 
 ### The bundle
@@ -34,6 +34,10 @@ parameters are:
 | `API_TOKEN` | `unset` | global, **secret** |
 
 The update step carries no `--param` at all. That absence is the case.
+
+The step has `--reinstall`. The bundle does not change, so without it
+`hcm update` finds the installation up to date and skips the rollback that this
+case is about.
 
 ## Expected outputs
 

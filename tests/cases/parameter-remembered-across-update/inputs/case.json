@@ -8,6 +8,6 @@
       "targets": ["claude-code"],
       "params": ["TEAM=Platform", "AGENT_NAME=Ada"]
     },
-    { "update": "branded-kit" }
+    { "update": "branded-kit", "reinstall": true }
   ]
 }

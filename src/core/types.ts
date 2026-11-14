@@ -486,6 +486,13 @@ export interface InstallationRecord {
    * field existed means too.
    */
   track?: TrackMode;
+  /**
+   * The digest of the bundle files that this installation came from. See
+   * `core/digest.ts`. `hcm update` skips an installation when the source has
+   * the same version and the same digest. Absent in a record written before
+   * this field existed: the next update reinstalls it one time.
+   */
+  digest?: string;
   installedAt: string;
   receipts: Receipt[];
   /**

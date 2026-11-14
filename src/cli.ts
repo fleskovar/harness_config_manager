@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { Command, Option } from 'commander';
 import {
   configGetCommand,
@@ -19,6 +20,7 @@ import { importCommand } from './commands/import.js';
 import { infoCommand } from './commands/info.js';
 import { initCommand } from './commands/init.js';
 import { installCommand } from './commands/install.js';
+import { installFromSourceCommand } from './commands/install-source.js';
 import { listCommand } from './commands/list.js';
 import {
   DEFAULT_PARAMS_FILE,
@@ -38,6 +40,7 @@ import { statusCommand } from './commands/status.js';
 import { targetsCommand } from './commands/targets.js';
 import { uninstallCommand } from './commands/uninstall.js';
 import { updateCommand } from './commands/update.js';
+import { upgradeCommand } from './commands/upgrade.js';
 import { validateCommand } from './commands/validate.js';
 import {
   COLLECTION_CLASH_POLICIES,
@@ -236,6 +239,12 @@ program
   .option('--refresh', 're-download a remote bundle instead of using the cache')
   .option('--no-deps', 'install only this bundle, not the ones it requires')
   .addOption(trackOption())
+  .option(
+    '--source <source>',
+    'find the named bundles in this repository or folder, and follow it on "hcm update" ' +
+      '(a path, owner/repo, a GitHub URL, or the clone URL of any git host)',
+  )
+  .option('--ref <ref>', 'with --source: the branch, tag or commit to read')
   .addOption(piSubagentsOption())
   .action(async (bundles: string[], options) => {
     const shared = {
@@ -253,6 +262,32 @@ program
       targetOptions: targetOptionsFrom(options),
       cwd,
     };
+
+    if (options.ref !== undefined && options.source === undefined) {
+      throw new HcmError('--ref needs --source', 'Give the repository with --source <url>.');
+    }
+
+    if (options.source !== undefined) {
+      if (options.requirements !== undefined) {
+        throw new HcmError(
+          'Give --source or -r, not both',
+          'A requirements file gives a source on each line: "<bundle> @ <url>[@ref]".',
+        );
+      }
+      if (options.track === 'registry') {
+        throw new HcmError(
+          '--source and --track registry contradict each other',
+          'An installation from --source follows that source. Use one of the two.',
+        );
+      }
+      await installFromSourceCommand(bundles, {
+        ...shared,
+        source: options.source as string,
+        ...(options.ref !== undefined ? { ref: options.ref as string } : {}),
+        ...(options.refresh !== undefined ? { refresh: options.refresh as boolean } : {}),
+      });
+      return;
+    }
 
     if (options.requirements !== undefined) {
       if (bundles.length > 0) {
@@ -323,8 +358,8 @@ program
       'omit for every bundle installed here',
   )
   .description(
-    're-read bundles from the registry or from their sources, and reinstall them in place ' +
-      '(default: everything installed here)',
+    're-read bundles from the registry or from their sources, and reinstall each one that ' +
+      'changed, in place (default: everything installed here)',
   )
   .addOption(targetOption())
   // Omitted, each installation keeps the flavors it recorded; passing it
@@ -356,8 +391,19 @@ program
     '--no-registry',
     'read each bundle from the source recorded in this project; do not refresh the registry',
   )
+  .option(
+    '--ref <ref>',
+    'read the recorded repository of the named bundle(s) at this branch, tag or commit, ' +
+      'and follow that ref from now on',
+  )
+  .option(
+    '--reinstall',
+    'reinstall also the bundles whose source has the same version and the same files',
+  )
   .action(async (bundles, options) => {
     await updateCommand(bundles, {
+      ...(options.ref !== undefined ? { ref: options.ref as string } : {}),
+      ...(options.reinstall ? { reinstall: true } : {}),
       ...(options.track ? { track: options.track as TrackMode } : {}),
       ...(options.from !== undefined ? { from: options.from as string } : {}),
       // commander gives --no-registry as registry: false
@@ -464,6 +510,20 @@ program
   .description('scaffold a new bundle')
   .action(async (directory, options) => {
     await initCommand(directory, { name: options.name, cwd });
+  });
+
+program
+  .command('upgrade')
+  .alias('self-update')
+  .description('upgrade hcm itself to the latest version on npm')
+  .option('--check', 'only report if a newer version is available')
+  .action(async (options) => {
+    await upgradeCommand({
+      check: options.check,
+      currentVersion: version,
+      // One directory above this file, as for package.json above.
+      packageRoot: fileURLToPath(new URL('..', import.meta.url)),
+    });
   });
 
 program

@@ -24,6 +24,10 @@ npm install -g harness-config-manager   # puts `hcm` on your PATH
 hcm --version
 ```
 
+To upgrade to the latest version, run `hcm upgrade`. The command runs
+`npm install -g harness-config-manager@<latest>` for you. To only see if a new
+version is available, run `hcm upgrade --check`.
+
 To try it without installing anything:
 
 ```bash
@@ -1268,9 +1272,9 @@ hcm install my-kit --on-conflict prompt     # ask even where hcm would not have
 
 | Command | What it does |
 | --- | --- |
-| `hcm install <bundle...>` | Install, with whatever it requires. `-t/--target`, `-f/--flavor`, `-s/--scope`, `--param`, `--params-file`, `--no-prompt`, `--dry-run`, `--force`, `--on-conflict`, `--refresh`, `--no-deps`, `--pi-subagents`, `--track registry\|source` |
+| `hcm install <bundle...>` | Install, with whatever it requires. `-t/--target`, `-f/--flavor`, `-s/--scope`, `--param`, `--params-file`, `--no-prompt`, `--dry-run`, `--force`, `--on-conflict`, `--refresh`, `--no-deps`, `--pi-subagents`, `--track registry\|source`, `--source <repo> [--ref <ref>]` ([from a repository](#install-from-a-repository-into-one-project---source)) |
 | `hcm install -r [file]` | Install each bundle of a [requirements file](#a-project-requirements-file-hcm-requirementstxt). Default file: `hcm-requirements.txt`. Takes the options of `hcm install`, except `--track` |
-| `hcm update [<bundle...>\|all]` | Re-read bundles from the registry or from their sources, and reinstall them in place. No argument: everything installed here; `all`: that, and everything registered. `-t`, `-f`, `-s`, `--param`, `--params-file`, `--reconfigure`, `--no-prompt`, `--dry-run`, `--force`, `--on-conflict`, `--pi-subagents`, `--track registry\|source`, `--from <source>`, `--no-registry` |
+| `hcm update [<bundle...>\|all]` | Re-read bundles from the registry or from their sources, and reinstall each bundle that changed, in place. No argument: everything installed here; `all`: that, and everything registered. `-t`, `-f`, `-s`, `--param`, `--params-file`, `--reconfigure`, `--no-prompt`, `--dry-run`, `--force`, `--on-conflict`, `--pi-subagents`, `--track registry\|source`, `--from <source>`, `--ref <ref>`, `--no-registry`, `--reinstall` |
 | `hcm uninstall <bundle...>` | Remove exactly what was installed. `-t`, `-s`, `--dry-run`, `--force`, `--cascade`, `--ignore-dependents`, `--keep-orphans` |
 | `hcm list` | Registered bundles with their ids and their status in this project (`●` = installed here). A "Local bundles" section shows the bundles that this project installed from its own dependencies, not from the registry. `-v/--verbose` (sources, flavors, parameters), `--descriptions`, `--json` |
 | `hcm list --installed` | Installed bundles. `--scope project\|user\|all`, `--json` |
@@ -1297,6 +1301,7 @@ hcm install my-kit --on-conflict prompt     # ask even where hcm would not have
 | `hcm export [file]` | Write installed (or `--registry`) bundles to `bundles.txt` |
 | `hcm import [file]` | Register everything a bundles file lists; `--install` to install too, `-f/--flavor`, `--param`, `--params-file`, `--on-conflict` |
 | `hcm config` | Show settings; `config set\|get\|unset` to change them |
+| `hcm upgrade` | Upgrade hcm to the latest version on npm. `--check` only reports if a new version is available. Alias: `hcm self-update` |
 
 `-t/--target` takes one or more harnesses — by id, alias or unambiguous prefix
 (`-t claude pi`) — or `all` for every one of them. In a folder used by several
@@ -1541,6 +1546,28 @@ version now collides with is put to you the same way `hcm install` does, and
 Bundles that are registered but not installed anywhere just get their stored
 copy refreshed.
 
+#### Up to date: no rollback, no install
+
+Each installation records the version of its bundle and a digest of the bundle
+files. `hcm update` reads the source, and compares both values:
+
+```
+review-kit v1.2.0 (up to date) [source]
+  from https://dev.azure.com/acme/platform/_git/agent-kits#HEAD:bundles/review-kit
+  up to date in copilot (project); nothing to do
+```
+
+- If the version and the files are the same, hcm does not change the installation.
+- If the version is different, hcm installs the new version.
+- If the files changed and the version did not, hcm also installs them. A branch can change without a new version.
+- If the run changes a setting, hcm installs again. The settings are `--flavor`, `--param`, `--params-file`, `--reconfigure`, `--pi-subagents`, `--track` and `--from`.
+- A record from an hcm without digests has no digest. The next update installs it one time, and records the digest.
+- To install again with no change, use `--reinstall`. For example, use it to put back an installed file that somebody deleted.
+
+hcm must read the source to know its version. Thus an update of a remote
+bundle still downloads the files of the ref, also when the result is "up to
+date".
+
 ### Follow the registry or the source
 
 Software that ships a bundle is installed in one of two ways, and each way needs
@@ -1595,6 +1622,40 @@ Rules:
 - A local source inside the project, for example in `.venv/` or `node_modules/`, is also recorded as a path relative to the project. A teammate's checkout of the project then reads its own environment.
 - If the source is gone, `hcm update` reports it, updates the other bundles, and exits with code 1. To point the installation at the new place, use `--from`.
 - The built-in `hcm` bundle always has the version of the hcm that runs. It cannot follow a source.
+
+### Install from a repository into one project: `--source`
+
+A team can keep its bundles in one repository, and install them into each
+project directly from there. Then no machine needs a registry entry:
+
+```bash
+hcm install review-kit --source https://dev.azure.com/acme/platform/_git/agent-kits -t copilot
+hcm install review-kit db-kit --source acme/agent-kits --ref v2.0.0 -t claude-code
+hcm install --source https://gitlab.com/acme/agent-kits.git -t copilot    # each bundle of the repository
+```
+
+Later, in the same project:
+
+```bash
+hcm update -t copilot --no-prompt
+```
+
+- `--source` takes each form that `hcm install` takes: a GitHub `owner/repo`, a GitHub URL, the [clone URL of any git host](#other-git-hosts-azure-devops-bitbucket-gitlab), an SSH URL, or a folder.
+- `--ref` names a branch, a tag or a commit. Without it, hcm reads the ref of the source, or else the default branch. Do not give two different refs.
+- hcm finds each bundle by the `name` field of its `hcm.yaml`. The bundle can be in any folder of the repository, as for a [requirements file](#a-project-requirements-file-hcm-requirementstxt).
+- If a name is wrong, hcm reports each wrong name, and installs nothing.
+- Without a bundle name, hcm installs each bundle of the source.
+- hcm records the folder of each bundle, with its ref, in `.hcm/state.json`. The installation follows that source, as with `--track source`. The registry does not change.
+- `hcm update` downloads the recorded ref again. If the bundle has a new version or new files, hcm installs it. Else it reports "up to date". See [Up to date](#up-to-date-no-rollback-no-install).
+- A branch gives its latest commit on each update. A tag stays on the same commit.
+- To move to a new tag, run `hcm update <bundle> --ref <new-tag>`. hcm reads the same folder of the same repository at that ref, installs it, and follows that ref from then on.
+- Do not run `hcm install` again to change the ref. An install does not remove the items that the new version dropped. `hcm update` removes them.
+- For a private repository, set a [token](#private-repositories).
+- Commit `.hcm/state.json` with the project. Then a teammate runs `hcm update`, and gets the same source.
+
+To list several bundles and their sources in one file, use a
+[requirements file](#a-project-requirements-file-hcm-requirementstxt). A line
+`review-kit @ <url>@<ref>` has the same effect as `--source` and `--ref`.
 
 ### Removing
 

@@ -22,7 +22,7 @@ team-kit
 | --- | --- | --- |
 | `hcm-requirements.txt` | The bundles belong to one project. Each person who works on the project must get them. | `hcm install -r` |
 | `bundles.txt` | One user wants the same registry on another machine. | `hcm import bundles.txt --install` |
-| No file | One project pins one bundle, and nobody else installs it. | `hcm install <source> --track source` |
+| No file | One project pins one bundle, and nobody else installs it. | `hcm install <bundle> --source <repository> [--ref <ref>]` |
 
 A requirements file does not change the registry. It installs into the project
 only.

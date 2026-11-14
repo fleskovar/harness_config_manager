@@ -113,6 +113,9 @@ the latest edits.
 | Install the new version of one bundle | `hcm update <bundle> -t <harness> --no-prompt` |
 | Install the new version from the recorded sources, with no change to the registry | `hcm update --no-registry -t <harness> --no-prompt` |
 | Install a bundle that must follow its own folder, for example a library in `.venv/` | `hcm install <folder> --track source -t <harness> --no-prompt` |
+| Install a bundle from a team repository into this project only, with no registry entry | `hcm install <bundle> --source <repository-url> [--ref <ref>] -t <harness> --no-prompt` |
+| Move a bundle from `--source` to a new tag or branch | `hcm update <bundle> --ref <ref> -t <harness> --no-prompt` |
+| Install an up-to-date bundle again, for example to put back a deleted file | `hcm update <bundle> --reinstall -t <harness> --no-prompt` |
 | Point an installation at a new folder, for example after the `.venv/` moved | `hcm update <bundle> --from <folder> -t <harness> --no-prompt` |
 | Make an installation follow the registry again | `hcm update <bundle> --track registry -t <harness> --no-prompt` |
 | Remove a bundle, and the dependencies that no other bundle needs | `hcm uninstall <bundle> -t <harness>` |
@@ -123,7 +126,8 @@ Each installation follows the registry or its source. `hcm update` reads the
 next version from there:
 
 - An installation made by name or id follows the registry.
-- An installation made with `--track source` follows its folder or repository. `hcm update` does not read the registry for it. Libraries use this mode, because each project can pin another version.
+- An installation made with `--track source` or `--source` follows its folder or repository. `hcm update` does not read the registry for it. Libraries and team repositories use this mode, because each project can pin another version.
+- `hcm update` reads each source. If the source has the same version and the same files, hcm reports "up to date", and does not change the installation.
 - With no `--track`, an installation from a path follows the registry if a bundle with that name is registered. Else it follows the path.
 - `hcm list --installed` marks a source installation `[source]`. It also shows the registered version when the two versions are different. Tell the user about a different version. Do not change the mode without the agreement of the user.
 

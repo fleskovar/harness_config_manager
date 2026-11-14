@@ -347,16 +347,7 @@ export async function locateRequirement(
 ): Promise<BundleSource> {
   const { source } = requirement;
   const root = await resolveSource(source, options);
-
-  const dirs = [...new Set([...(await discoverBundleDirs(root)), ...(await findNestedBundleDirs(root))])];
-  const found: { dir: string; name: string }[] = [];
-  for (const dir of dirs) {
-    try {
-      found.push({ dir, name: (await loadManifest(dir)).name });
-    } catch {
-      // A broken manifest of another bundle is not this line's problem.
-    }
-  }
+  const found = await manifestsUnder(root);
 
   const matches = found.filter((bundle) => bundle.name === requirement.name);
   const where = sourceReference(source);
@@ -378,7 +369,48 @@ export async function locateRequirement(
     );
   }
 
-  const relative = toPosix(path.relative(root, (matches[0] as { dir: string }).dir));
+  return narrowTo(source, root, (matches[0] as { dir: string }).dir);
+}
+
+/**
+ * The source of each bundle in a source, by the name in its manifest. The
+ * search covers the root, its subfolders and deeper folders, as for a line
+ * of a requirements file.
+ */
+export async function bundlesInSource(
+  source: BundleSource,
+  options: FetchOptions = {},
+): Promise<{ name: string; source: BundleSource }[]> {
+  const root = await resolveSource(source, options);
+  const found = await manifestsUnder(root);
+  if (found.length === 0) {
+    throw new HcmError(
+      `There is no bundle in ${sourceReference(source)}`,
+      'There is no bundle manifest (hcm.yaml) there.',
+    );
+  }
+  return found
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((bundle) => ({ name: bundle.name, source: narrowTo(source, root, bundle.dir) }));
+}
+
+/** Each folder under `root` that holds a readable bundle manifest, with its name. */
+async function manifestsUnder(root: string): Promise<{ dir: string; name: string }[]> {
+  const dirs = [...new Set([...(await discoverBundleDirs(root)), ...(await findNestedBundleDirs(root))])];
+  const found: { dir: string; name: string }[] = [];
+  for (const dir of dirs) {
+    try {
+      found.push({ dir, name: (await loadManifest(dir)).name });
+    } catch {
+      // A broken manifest of another bundle is not this bundle's problem.
+    }
+  }
+  return found;
+}
+
+/** The source of the folder `dir`, which is inside `root`, the folder of `source`. */
+function narrowTo(source: BundleSource, root: string, dir: string): BundleSource {
+  const relative = toPosix(path.relative(root, dir));
   if (!relative) return source;
   if (source.type === 'local') return { type: 'local', path: path.join(source.path, relative) };
   return { ...source, subdir: [source.subdir, relative].filter(Boolean).join('/') };

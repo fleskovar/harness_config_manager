@@ -114,6 +114,8 @@ export type CaseStep =
       from?: string;
       /** `--no-registry`. */
       noRegistry?: boolean;
+      /** `--reinstall`. */
+      reinstall?: boolean;
       fails?: boolean;
     }
   /** `hcm uninstall <bundle...>` */
@@ -277,6 +279,7 @@ async function runStep(step: CaseStep, ctx: RunContext): Promise<void> {
         ...(step.track ? { track: step.track } : {}),
         ...(step.from ? { from: at(step.from) } : {}),
         ...(step.noRegistry ? { registry: false } : {}),
+        ...(step.reinstall ? { reinstall: true } : {}),
       }),
     );
     return;
