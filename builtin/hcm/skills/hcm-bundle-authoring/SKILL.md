@@ -50,6 +50,7 @@ folder name is the resource name.
 - Keep context short. The harness loads it in each session. Put long instructions in a skill.
 - Use one context file for each section. Start each file name with a two-digit number, for example `10-`, to set the order.
 - Do not give a subagent, a skill and a command the same name. Some harnesses keep them in one namespace.
+- A command can use `$ARGUMENTS`, `$1` and `$2` for the values of each run. GitHub Copilot and GitHub Copilot CLI do not replace them. See [Prompt templates](./reference.md#prompt-templates-arguments-and-parameters).
 - Put a prefix on the names of MCP servers, subagents and commands that belong to a team or product: `acme-postgres`, not `postgres`.
 - Do not put secrets in a bundle. In MCP and settings files, refer to an environment variable: `"API_KEY": "${MY_API_KEY}"`.
 - Keep settings fragments small. The user cannot change a key that the bundle sets without drift in `hcm status`.

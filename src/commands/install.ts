@@ -6,6 +6,7 @@ import {
   resolvePlanConflicts,
   seedRenames,
 } from '../core/conflicts.js';
+import { commandArgumentIssues, describeCommandArgumentIssue } from '../core/command-arguments.js';
 import { captureContext } from '../core/context.js';
 import { bundleDigest } from '../core/digest.js';
 import {
@@ -297,6 +298,10 @@ export async function installCommand(
 
   options = { ...options, presentTargets: presentAfterThisRun(found, affected) };
 
+  // Said before the first parameter question and the first write: the user can
+  // still stop the run and choose other harnesses.
+  warnAboutCommandArguments(graph, targets, flavors);
+
   // `graph.order` puts dependencies first, so by the time a dependent is
   // planned its dependency's items are on disk and claimed -- which is what
   // turns a shared asset into one copy with two claims rather than a conflict.
@@ -460,6 +465,30 @@ function withoutDependencies(roots: LoadedBundle[]): DependencyGraph {
     byName: new Map(order.map((entry) => [entry.bundle.manifest.name, entry])),
     hasDependencies: false,
   };
+}
+
+/**
+ * Warn about each command that uses `$ARGUMENTS` or `$1` and goes into a harness
+ * that does not replace them. See `core/command-arguments.ts`.
+ */
+function warnAboutCommandArguments(
+  graph: DependencyGraph,
+  targets: Map<string, TargetId[]>,
+  flavors: string[],
+): void {
+  const issues = graph.order.flatMap((entry) =>
+    commandArgumentIssues(entry.bundle, targets.get(entry.bundle.manifest.name) ?? [], flavors),
+  );
+  if (issues.length === 0) return;
+
+  for (const issue of issues) {
+    log.warn(`${issue.bundle}: ${describeCommandArgumentIssue(issue)}`);
+  }
+  log.warn(
+    color.dim(
+      '  to avoid this, install into other harnesses with -t, or write the command without arguments',
+    ),
+  );
 }
 
 function warnAboutSkippedDependencies(roots: LoadedBundle[]): void {

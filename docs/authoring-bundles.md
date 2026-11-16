@@ -358,6 +358,10 @@ each installation holds.
 - a narrowed parameter with no default, used where it is not asked for
 - a placeholder in a `name:`, which decides a filename and is never substituted
 
+A parameter is not a command argument. For a value that changes in each run,
+use `$ARGUMENTS` or `$1`. See
+[Prompt templates](#prompt-templates-arguments-and-parameters).
+
 ## Writing each resource kind
 
 ### Subagents — `subagents/<name>.md`
@@ -461,6 +465,69 @@ from the filename, `allowedTools` becomes `allowed-tools`, and `argumentHint` is
 dropped because nothing reads it. Commands and skills therefore share one
 namespace on that harness — do not give a command the same name as a skill in
 the same bundle, and `hcm validate` will tell you if you have.
+
+#### Prompt templates: arguments and parameters
+
+A command is a prompt template. A template can get values at two different
+times:
+
+| Syntax | Who fills it | When |
+| --- | --- | --- |
+| `$ARGUMENTS` | The harness | Each run. It is all text after the command name. |
+| `$1`, `$2` | The harness | Each run. Each one is one word after the command name. |
+| `<%NAME%>` | hcm | At install time. See [Parameters](#parameters-finishing-the-kit-at-install-time). |
+
+Use an argument for a value that changes each time, for example a module name.
+Use a parameter for a value that is the same in all runs in one project, for
+example a team name. One template can use both:
+
+```markdown
+---
+description: Write a migration plan for one module
+argumentHint: "<module> <version>"
+---
+
+Write a migration plan for the `$1` module to version `$2`.
+Link each step to a <%TICKET_PREFIX%> ticket.
+```
+
+```bash
+hcm install ./my-kit -t claude-code --param TICKET_PREFIX=PAY
+```
+
+The user then types `/migration-plan auth 3.0`.
+
+hcm does not change `$ARGUMENTS` or `$1`. Thus, each harness must replace
+them:
+
+| Harness | `$ARGUMENTS`, `$1` | `argumentHint` |
+| --- | --- | --- |
+| Claude Code | Replaced | Kept |
+| OpenCode | Replaced | Dropped |
+| Reasonix | Replaced | Kept |
+| Pi | Replaced | Kept |
+| GitHub Copilot (IDE) | Not replaced. Copilot uses `${input:name}`. | Dropped |
+| GitHub Copilot CLI | Not replaced. The command is a skill there. | Dropped |
+
+In GitHub Copilot and GitHub Copilot CLI, the model gets the literal text
+`$1`. hcm shows a warning for each command with this problem:
+
+```text
+$ hcm install ./my-kit -t copilot
+! my-kit: commands/migration-plan.md: uses $1, $2, which GitHub Copilot does not replace; the command gets the literal text there
+!   to avoid this, install into other harnesses with -t, or write the command without arguments
+```
+
+`hcm install` shows the warning before it asks for parameter values and
+before it writes a file. Thus, you can stop the run and select other
+harnesses. `hcm validate` shows the same warning for each harness that the
+manifest permits. The warning does not make the bundle invalid.
+
+To prevent the problem, do one of these steps:
+
+- If the bundle has no use in Copilot, remove `copilot` and `copilot-cli` from `targets` in `hcm.yaml`.
+- If the command must work in Copilot, write the value in plain words. For example, write "Use the module name that the user gives".
+- Put the command in a flavor. Then tell Copilot users to install a different flavor.
 
 ### Rules — `rules/<name>.md`
 

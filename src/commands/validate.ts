@@ -1,4 +1,5 @@
 import { validateBundle } from '../core/bundle.js';
+import { commandArgumentWarnings } from '../core/command-arguments.js';
 import { resolveDependencyGraph } from '../core/deps.js';
 import { color, log } from '../core/logger.js';
 import { resolveBundles } from '../core/registry.js';
@@ -10,9 +11,14 @@ export async function validateCommand(reference: string, options: { cwd: string 
 
   for (const bundle of bundles) {
     const problems = [...validateBundle(bundle), ...(await dependencyProblems(bundle, options.cwd))];
+    // A warning does not make the bundle invalid: the bundle installs, and it
+    // works on the other harnesses. The author decides if that is acceptable.
+    const warnings = commandArgumentWarnings(bundle);
 
     log.plain(`${color.bold(bundle.manifest.name)} ${color.dim(`v${bundle.manifest.version}`)}`);
     log.plain(color.dim(`  ${bundle.resources.length} resource(s)`));
+
+    for (const warning of warnings) log.warn(`  ${warning}`);
 
     if (problems.length === 0) {
       log.success('  No problems found.');

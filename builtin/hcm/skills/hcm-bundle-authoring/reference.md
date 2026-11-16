@@ -95,6 +95,55 @@ Review this branch against `$ARGUMENTS`.
 Copilot CLI has no folder for commands, so hcm writes a command there as a
 skill. Thus a command and a skill with the same name collide there.
 
+#### Prompt templates: arguments and parameters
+
+A command is a prompt template. A template can get values at two different
+times:
+
+| Syntax | Who fills it | When |
+| --- | --- | --- |
+| `$ARGUMENTS` | The harness | Each run. It is all text after the command name. |
+| `$1`, `$2` | The harness | Each run. Each one is one word after the command name. |
+| `<%%NAME%>` | hcm | At install time. See [Parameters](#parameters). |
+
+Use an argument for a value that changes each time, for example a module name.
+Use a parameter for a value that is the same in all runs in one project, for
+example a team name. One template can use both:
+
+```markdown
+---
+description: Write a migration plan for one module
+argumentHint: "<module> <version>"
+---
+
+Write a migration plan for the `$1` module to version `$2`.
+Link each step to a <%%TICKET_PREFIX%> ticket.
+```
+
+The user then types `/migration-plan auth 3.0`.
+
+hcm does not change `$ARGUMENTS` or `$1`. Thus, each harness must replace
+them:
+
+| Harness | `$ARGUMENTS`, `$1` | `argumentHint` |
+| --- | --- | --- |
+| Claude Code | Replaced | Kept |
+| OpenCode | Replaced | Dropped |
+| Reasonix | Replaced | Kept |
+| Pi | Replaced | Kept |
+| GitHub Copilot (IDE) | Not replaced. Copilot uses `${input:name}`. | Dropped |
+| GitHub Copilot CLI | Not replaced. The command is a skill there. | Dropped |
+
+In GitHub Copilot and GitHub Copilot CLI, the model gets the literal text
+`$1`. `hcm validate` and `hcm install` show a warning for each command with
+this problem. The warning does not stop the install.
+
+To prevent the problem, do one of these steps:
+
+- If the bundle has no use in Copilot, remove `copilot` and `copilot-cli` from `targets` in `hcm.yaml`.
+- If the command must work in Copilot, write the value in plain words. For example, write "Use the module name that the user gives".
+- Put the command in a flavor. Then tell Copilot users to install a different flavor.
+
 ### Rule: `rules/<name>.md`
 
 ```markdown
@@ -220,3 +269,4 @@ parameters:
 - To write a literal placeholder, double the first `%`.
 - Give a default to each parameter that can have one.
 - `hcm validate` reports a placeholder with no declared parameter, a parameter that no file uses, and a placeholder in a `name:` field.
+- A parameter is not a command argument. For values that change in each run, use `$ARGUMENTS` or `$1`. See [Prompt templates](#prompt-templates-arguments-and-parameters).
