@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadBundle } from '../src/core/bundle.js';
 import { applyPlan } from '../src/core/executor.js';
 import { buildPlan } from '../src/core/planner.js';
-import { rollback } from '../src/core/rollback.js';
+import { auditInstallation, rollback } from '../src/core/rollback.js';
 import { collectClaims, removeInstallation, upsertInstallation } from '../src/core/state.js';
 import { installationId, type InstallationRecord, type TargetId } from '../src/core/types.js';
 
@@ -247,6 +247,56 @@ describe('claude-code install/uninstall', () => {
 
     await rollback(second, projectDir);
     expect(await exists('.mcp.json')).toBe(false);
+  });
+
+  /**
+   * Every byte value from 0x00 to 0xff, behind a PNG signature. Most of these
+   * bytes are not valid UTF-8, the same as in a real PNG or PBIX file. A text
+   * decode replaces them, and then the hash does not agree with the receipt.
+   */
+  const BINARY_ASSET = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.from(Array.from({ length: 256 }, (_, byte) => byte)),
+  ]);
+
+  async function installWithBinaryAsset(): Promise<InstallationRecord> {
+    const alpha = await makeBundle('alpha', 'alpha-server', 'Read(**)');
+    await fs.mkdir(path.join(alpha, 'assets'), { recursive: true });
+    await fs.writeFile(path.join(alpha, 'assets', 'logo.png'), BINARY_ASSET);
+    return install(alpha, 'claude-code');
+  }
+
+  const assetResult = (results: Awaited<ReturnType<typeof rollback>>) =>
+    results.find((result) => result.receipt.op === 'file' && result.receipt.path === '.claude/logo.png');
+
+  it('does not report an untouched binary asset as modified, and removes it without force', async () => {
+    const record = await installWithBinaryAsset();
+    expect((await fs.readFile(path.join(projectDir, '.claude', 'logo.png'))).equals(BINARY_ASSET)).toBe(true);
+
+    // `hcm status` reads the same audit.
+    const audit = await auditInstallation(record, projectDir);
+    expect(assetResult(audit)?.status).toBe('removed');
+
+    const results = await rollback(record, projectDir);
+    expect(assetResult(results)?.status).toBe('removed');
+    expect(await exists('.claude/logo.png')).toBe(false);
+  });
+
+  it('still refuses to remove a binary asset edited since install, unless forced', async () => {
+    const record = await installWithBinaryAsset();
+
+    // One byte changed. The file stays binary, so only a byte comparison sees the edit.
+    const edited = Buffer.from(BINARY_ASSET);
+    edited[edited.length - 1] = 0x00;
+    await fs.writeFile(path.join(projectDir, '.claude', 'logo.png'), edited);
+
+    const results = await rollback(record, projectDir);
+    expect(assetResult(results)?.status).toBe('modified');
+    expect((await fs.readFile(path.join(projectDir, '.claude', 'logo.png'))).equals(edited)).toBe(true);
+
+    const forced = await rollback(record, projectDir, { force: true });
+    expect(assetResult(forced)?.status).toBe('removed');
+    expect(await exists('.claude/logo.png')).toBe(false);
   });
 });
 

@@ -18,6 +18,7 @@ import path from 'node:path';
 import {
   fromPosix,
   pruneEmptyDirs,
+  readBytesIfExists,
   readJsonIfExists,
   readTextIfExists,
   removeFile,
@@ -139,7 +140,9 @@ async function rollbackFiles(
       continue;
     }
 
-    const current = await readTextIfExists(absolutePath);
+    // Hash the bytes, as the install did. A UTF-8 decode replaces the invalid
+    // bytes of a binary file, so the hash of the text never agrees with the receipt.
+    const current = await readBytesIfExists(absolutePath);
     if (current === undefined) {
       results.push({ receipt, status: 'missing' });
       continue;
