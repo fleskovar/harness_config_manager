@@ -17,6 +17,10 @@
  * A bare repository has no checkout, so `core.autocrlf` and the other
  * work-tree settings do not change the bytes. The files are the blobs as they
  * are in the repository, as the HTTPS client gives them.
+ *
+ * Each command names the repository with `--git-dir`. Thus the Git safety
+ * settings for a repository that Git finds by itself (`safe.bareRepository`
+ * and `safe.directory`) do not refuse it.
  */
 
 import { spawn } from 'node:child_process';
@@ -95,7 +99,12 @@ export async function downloadWithGit(
 
   try {
     const git = async (args: string[], input?: Buffer): Promise<Buffer> => {
-      const result = await run(['-C', temporary, ...args], input ? { input } : {});
+      // --git-dir names the repository. With -C, git finds the repository by
+      // itself, and then safe.bareRepository=explicit and the safe.directory
+      // ownership check can refuse it. These settings protect the user from a
+      // repository of another person. hcm makes this repository itself, so
+      // they do not apply.
+      const result = await run([`--git-dir=${temporary}`, ...args], input ? { input } : {});
       if (result.code !== 0) throw fetchFailure(options, result.stderr);
       return result.stdout;
     };

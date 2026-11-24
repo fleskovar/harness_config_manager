@@ -261,6 +261,29 @@ describe.skipIf(!hasGit)('downloading with the git program', () => {
     expect(next.files.map((file) => file.path).sort()).toEqual(['README.md', 'kits/alpha/hcm.yaml']);
     expect(next.commit).toBe(git(repo, 'rev-parse', 'next').trim());
   });
+
+  // With safe.bareRepository=explicit, Git refuses a bare repository that it
+  // finds by itself. hcm makes its own temporary bare repository, so this
+  // setting must not stop the download.
+  it('works when the user sets safe.bareRepository to "explicit"', async () => {
+    const repo = path.join(workspace, 'repo');
+    await fs.mkdir(repo, { recursive: true });
+    git(repo, 'init', '--quiet', '--initial-branch=main');
+    await fs.writeFile(path.join(repo, 'hcm.yaml'), 'name: alpha\nversion: 1.0.0\n');
+    git(repo, 'add', '.');
+    git(repo, 'commit', '--quiet', '-m', 'one');
+
+    // Git reads this configuration from the environment, as if it were global.
+    vi.stubEnv('GIT_CONFIG_COUNT', '1');
+    vi.stubEnv('GIT_CONFIG_KEY_0', 'safe.bareRepository');
+    vi.stubEnv('GIT_CONFIG_VALUE_0', 'explicit');
+    try {
+      const download = await downloadWithGit({ url: repo, ref: 'main' });
+      expect(download.files.map((file) => file.path)).toEqual(['hcm.yaml']);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
